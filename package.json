@@ -1,0 +1,31 @@
+{
+  "name": "smart-split",
+  "version": "2.0.0",
+  "description": "Zero-runtime-framework group expense settlement, integer math engine & financial intelligence platform",
+  "type": "module",
+  "scripts": {
+    "test": "php tests/run_all_tests.php",
+    "test:php": "php tests/run_all_tests.php",
+    "test:js": "node tests/run_frontend_tests.mjs",
+    "test:unit": "php tests/test_math.php && php tests/test_settlement_engine.php && node tests/test_client_core.mjs",
+    "test:invariants": "php tests/test_financial_invariants_deep.php && node tests/test_frontend_financial_invariants.mjs",
+    "test:e2e": "npx playwright test",
+    "test:e2e:smoke": "npx playwright test tests/e2e/specs/smoke.spec.js",
+    "test:e2e:mobile": "npx playwright test --project=\"Mobile Chrome\"",
+    "test:e2e:report": "npx playwright show-report tests/e2e/reports/html",
+    "test:all": "php tests/run_all_tests.php && npx playwright test"
+  },
+  "keywords": [
+    "expense-splitter",
+    "debt-simplification",
+    "hare-niemeyer",
+    "zero-loss-math",
+    "upi-qr",
+    "multi-currency"
+  ],
+  "author": "Smart Split Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

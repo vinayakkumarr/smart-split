@@ -1,0 +1,23 @@
+/* Google Fonts for Brand Identity */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+  /* Smart Split Brand Palette */
+  --ss-obsidian: #080C14;
+  --ss-slate-card: #0F172A;
+  --ss-border: #1E293B;
+  --ss-mint: #00F59B;
+  --ss-mint-hover: #00D888;
+  --ss-white: #FFFFFF;
+  --ss-coral-debt: #FF4B55;
+  --ss-upi-indigo: #6366F1;
+
+  /* Typography */
+  --font-brand: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+.ss-logo-interactive {
+  display: inline-flex;
+  cursor: pointer;
+}

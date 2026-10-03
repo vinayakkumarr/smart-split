@@ -1,0 +1,16 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .wing-dynamic { fill: #080C14; }
+    @media (prefers-color-scheme: dark) {
+      .wing-dynamic { fill: #FFFFFF; }
+    }
+  </style>
+
+  <!-- Wing 1: Pure Settlement Mint -->
+  <path d="M 24 38 C 24 25.85 33.85 16 46 16 L 86 16 C 98.15 16 108 25.85 108 38 L 108 46 C 108 56.5 99.5 65 89 65 L 66 65 L 48 47 L 82 47 C 85.3 47 88 44.3 88 41 L 88 35 C 88 31.7 85.3 29 82 29 L 46 29 C 41 29 37 33 37 38 Z" fill="#00F59B" />
+
+  <!-- Wing 2: Inverts automatically based on OS/browser theme -->
+  <g transform="rotate(180 60 60)">
+    <path class="wing-dynamic" d="M 24 38 C 24 25.85 33.85 16 46 16 L 86 16 C 98.15 16 108 25.85 108 38 L 108 46 C 108 56.5 99.5 65 89 65 L 66 65 L 48 47 L 82 47 C 85.3 47 88 44.3 88 41 L 88 35 C 88 31.7 85.3 29 82 29 L 46 29 C 41 29 37 33 37 38 Z" />
+  </g>
+</svg>

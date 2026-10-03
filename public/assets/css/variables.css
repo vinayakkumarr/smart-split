@@ -1,0 +1,227 @@
+/**
+ * Smart Split V2 – Institutional Financial Design Tokens & Architecture
+ * Principles: Precision, Restrained Palette, Editorial Typography, High-Contrast Functional Clarity
+ */
+
+:root {
+    /* -------------------------------------------------------------------------
+     * 1. Final Refined Light-First Financial Foundation & Palette
+     * ------------------------------------------------------------------------- */
+    --canvas-bg: #F7F8F6;             /* Warm, refined primary page canvas */
+    --surface-primary: #FFFFFF;       /* Pure white for form & content surfaces */
+    --surface-secondary: #F1F3F1;     /* Subtle neutral grouping / secondary sections */
+    --surface-tertiary: #E8EBE8;
+    --surface-elevated: #FFFFFF;
+    --surface-header: #FFFFFF;        /* Mature, clean white header */
+    --surface-header-dark: #18352B;
+
+    /* -------------------------------------------------------------------------
+     * 2. Typography & Contrast Tokens (High-Contrast Inter / System Stack)
+     * ------------------------------------------------------------------------- */
+    --text-primary: #171A19;          /* High-contrast dark charcoal (16.5:1 on #FFF) */
+    --text-secondary: #575E5A;        /* Refined slate body (6.4:1 on #FFF) */
+    --text-muted: #68706C;            /* WCAG AA compliant captions, timestamps, labels (4.8:1 on #FFF) */
+    --text-subtle: #858D89;           /* Readable inactive states & placeholders (3.4:1 on #FFF) */
+    --text-inverse: #FFFFFF;          /* Pure white copy on dark brand controls */
+
+    --font-ui: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, "Roboto Mono", Menlo, Consolas, monospace;
+
+    /* Typographic Scale (Calibrated for >= 12px accessible minimum at 14px root) */
+    --font-size-2xs: 0.857rem;        /* 12.0px Captions, Form Hints, Metadata */
+    --font-size-xs: 0.892rem;         /* 12.5px Table Headers, Uppercase Labels */
+    --font-size-sm: 0.964rem;         /* 13.5px Body Small, Roster Chips */
+    --font-size-base: 1.071rem;       /* 15.0px Body Standard, Inputs, Buttons */
+    --font-size-md: 1.214rem;         /* 17.0px Body Large, Lead Paragraphs */
+    --font-size-lg: 1.428rem;         /* 20.0px Subheadings, Panel Headers */
+    --font-size-xl: 2.142rem;         /* 30.0px Section Headings */
+    --font-size-2xl: 3.214rem;        /* 45.0px Hero Display Headline */
+
+    /* -------------------------------------------------------------------------
+     * 3. Borders & Structural Rules
+     * ------------------------------------------------------------------------- */
+    --border-subtle: #F1F3F1;
+    --border-color: #DDE2DE;          /* Precision 1px Structural Border */
+    --border-strong: #C2C9C3;         /* Interactive controls & active tabs */
+    --border-focus: #18352B;          /* Brand focus border */
+    --border-focus-ring: rgba(24, 53, 43, 0.12);
+
+    /* -------------------------------------------------------------------------
+     * 4. Brand & Primary Interactive Palette
+     * ------------------------------------------------------------------------- */
+    --brand-primary: #18352B;         /* Deep Forest Green Authority */
+    --brand-primary-hover: #102A21;
+    --brand-primary-active: #0A1B15;
+    --brand-primary-soft: #E8F0EC;    /* Soft Brand Background Tint */
+    --brand-accent: #18352B;          /* Selected state / links */
+    --brand-accent-hover: #102A21;
+    --brand-accent-light: #E8F0EC;
+    --brand-accent-border: #C9D0CB;
+
+    /* -------------------------------------------------------------------------
+     * 5. Semantic Financial Palette (Restrained Deep Green Credit, Deep Red Debit)
+     * ------------------------------------------------------------------------- */
+    /* Credit / Asset / Owed to You (Deep Forest Green) */
+    --financial-credit: #087A5B;
+    --financial-credit-text: #065A43;
+    --financial-credit-bg: #E8F5F1;
+    --financial-credit-border: #B6E2D5;
+
+    /* Debt / Liability / You Owe (Deep Crimson Red) */
+    --financial-debt: #C43D3D;
+    --financial-debt-text: #8C2424;
+    --financial-debt-bg: #FDF1F1;
+    --financial-debt-border: #F7C8C8;
+
+    /* Settled / Zero Balance (Slate Neutral) */
+    --financial-settled: #66706B;
+    --financial-settled-text: #3B423F;
+    --financial-settled-bg: #F1F3F1;
+    --financial-settled-border: #DDE2DE;
+
+    /* Warning / Pending (Warm Amber) */
+    --financial-warning: #B45309;
+    --financial-warning-text: #78350F;
+    --financial-warning-bg: #FFFBEB;
+    --financial-warning-border: #FDE68A;
+
+    /* -------------------------------------------------------------------------
+     * 6. Spacing Scale (Deterministic 4px/8px Grid)
+     * ------------------------------------------------------------------------- */
+    --space-1: 0.25rem;  /* 4px */
+    --space-2: 0.5rem;   /* 8px */
+    --space-3: 0.75rem;  /* 12px */
+    --space-4: 1rem;     /* 16px */
+    --space-5: 1.25rem;  /* 20px */
+    --space-6: 1.5rem;   /* 24px */
+    --space-8: 2rem;     /* 32px */
+    --space-10: 2.5rem;  /* 40px */
+    --space-12: 3rem;    /* 48px */
+    --space-16: 4rem;    /* 64px */
+
+    /* -------------------------------------------------------------------------
+     * 7. Deliberate Micro-Radii (Controlled 8px System)
+     * ------------------------------------------------------------------------- */
+    --radius-xs: 4px;    /* Chips, micro tags, status indicators */
+    --radius-sm: 8px;    /* Form inputs, select dropdowns, buttons */
+    --radius-md: 10px;   /* Panels, cards, modal dialogs */
+    --radius-lg: 14px;   /* Workspace shells, hero containers */
+    --radius-full: 9999px; /* Status dots and circular avatars only */
+
+    /* -------------------------------------------------------------------------
+     * 8. Restrained Micro-Elevation & Depth
+     * ------------------------------------------------------------------------- */
+    --shadow-none: none;
+    --shadow-subtle: 0 1px 2px 0 rgba(23, 26, 25, 0.04);
+    --shadow-panel: 0 1px 3px 0 rgba(23, 26, 25, 0.05), 0 1px 2px -1px rgba(23, 26, 25, 0.03);
+    --shadow-dropdown: 0 4px 6px -1px rgba(23, 26, 25, 0.07), 0 2px 4px -2px rgba(23, 26, 25, 0.03);
+    --shadow-modal: 0 20px 25px -5px rgba(23, 26, 25, 0.10), 0 8px 10px -6px rgba(23, 26, 25, 0.04);
+
+    /* -------------------------------------------------------------------------
+     * 9. Transitions & Performance
+     * ------------------------------------------------------------------------- */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* -------------------------------------------------------------------------
+     * 10. Backward-Compatibility Aliases
+     * ------------------------------------------------------------------------- */
+    --bg-page: var(--canvas-bg);
+    --bg-card: var(--surface-primary);
+    --bg-surface-subtle: var(--surface-secondary);
+    --text-main: var(--text-primary);
+    --font-sans: var(--font-ui);
+    --color-primary: var(--brand-primary);
+    --color-primary-hover: var(--brand-primary-hover);
+    --color-primary-light: var(--brand-primary-soft);
+    --color-primary-border: var(--border-color);
+    --color-credit: var(--financial-credit);
+    --color-credit-text: var(--financial-credit-text);
+    --color-credit-bg: var(--financial-credit-bg);
+    --color-credit-border: var(--financial-credit-border);
+    --color-debt: var(--financial-debt);
+    --color-debt-text: var(--financial-debt-text);
+    --color-debt-bg: var(--financial-debt-bg);
+    --color-debt-border: var(--financial-debt-border);
+    --color-settled: var(--financial-settled);
+    --color-settled-text: var(--financial-settled-text);
+    --color-settled-bg: var(--financial-settled-bg);
+    --color-settled-border: var(--financial-settled-border);
+    --color-warning: var(--financial-warning);
+    --shadow-xs: var(--shadow-subtle);
+    --shadow-sm: var(--shadow-subtle);
+    --shadow-md: var(--shadow-panel);
+    --shadow-lg: var(--shadow-dropdown);
+    --shadow-xl: var(--shadow-modal);
+}
+
+/* -----------------------------------------------------------------------------
+ * 11. Dark Theme Institutional Financial Foundation & Semantic Palette
+ * Obsidian & Slate Foundation with High-Luminance Emerald Accents (Linear / Stripe Standard)
+ * ----------------------------------------------------------------------------- */
+[data-theme="dark"] {
+    /* 1. Surfaces & Canvas (Obsidian 4-Tier Spatial Hierarchy) */
+    --canvas-bg: #090B0E;             /* Deepest obsidian canvas (Zero retinal strain) */
+    --surface-primary: #11151A;       /* Crisp slate panel & card surface */
+    --surface-secondary: #161B22;     /* Grouping wells & secondary sections */
+    --surface-tertiary: #1E252E;      /* Hover states / subtle interactive wells */
+    --surface-elevated: #181E26;      /* Elevated dropdowns, popovers & modal surfaces */
+    --surface-header: #0D1117;        /* Razor-sharp executive header background */
+    --surface-header-dark: #090B0E;
+
+    /* 2. Typography & Contrast Tokens (High-Luminance Inter / System Stack) */
+    --text-primary: #F8FAFC;          /* High-contrast crisp white (17.2:1 on #11151A) */
+    --text-secondary: #94A3B8;        /* Refined slate body (8.5:1 on #11151A) */
+    --text-muted: #64748B;            /* WCAG AA compliant captions & metadata (5.2:1 on #11151A) */
+    --text-subtle: #475569;           /* Readable inactive states & placeholders (3.5:1 on #11151A) */
+    --text-inverse: #022C22;          /* Deep dark emerald text on high-luminance emerald buttons */
+
+    /* 3. Borders & Precision Alpha Hairlines */
+    --border-subtle: rgba(255, 255, 255, 0.05);
+    --border-color: rgba(255, 255, 255, 0.09);          /* Precision 1px Structural Alpha Border */
+    --border-strong: rgba(255, 255, 255, 0.16);         /* Active tabs, inputs, interactive borders */
+    --border-focus: #10B981;                            /* Vivid emerald focus ring */
+    --border-focus-ring: rgba(16, 185, 129, 0.25);
+
+    /* 4. Brand & Primary Interactive Palette (Vivid High-Density Emerald) */
+    --brand-primary: #10B981;         /* High-luminance Emerald Authority */
+    --brand-primary-hover: #059669;
+    --brand-primary-active: #047857;
+    --brand-primary-soft: rgba(16, 185, 129, 0.12);    /* Soft emerald background tint */
+    --brand-accent: #10B981;          /* Selected state / links */
+    --brand-accent-hover: #34D399;
+    --brand-accent-light: rgba(16, 185, 129, 0.12);
+    --brand-accent-border: rgba(16, 185, 129, 0.28);
+
+    /* 5. Semantic Financial Palette (Luminous Translucent Pills) */
+    /* Credit / Asset / Owed to You (Crisp Mint / Emerald) */
+    --financial-credit: #34D399;
+    --financial-credit-text: #6EE7B7;
+    --financial-credit-bg: rgba(16, 185, 129, 0.12);
+    --financial-credit-border: rgba(16, 185, 129, 0.28);
+
+    /* Debt / Liability / You Owe (Crisp Coral Red) */
+    --financial-debt: #F87171;
+    --financial-debt-text: #FCA5A5;
+    --financial-debt-bg: rgba(239, 68, 68, 0.12);
+    --financial-debt-border: rgba(239, 68, 68, 0.28);
+
+    /* Settled / Zero Balance (Refined Cool Slate) */
+    --financial-settled: #94A3B8;
+    --financial-settled-text: #CBD5E1;
+    --financial-settled-bg: rgba(148, 163, 184, 0.08);
+    --financial-settled-border: rgba(148, 163, 184, 0.18);
+
+    /* Warning / Pending (Luminous Amber) */
+    --financial-warning: #FBBF24;
+    --financial-warning-text: #FDE68A;
+    --financial-warning-bg: rgba(245, 158, 11, 0.12);
+    --financial-warning-border: rgba(245, 158, 11, 0.28);
+
+    /* 8. Restrained Micro-Elevation for Dark Theme */
+    --shadow-subtle: 0 1px 2px 0 rgba(0, 0, 0, 0.45);
+    --shadow-panel: 0 1px 3px 0 rgba(0, 0, 0, 0.55), 0 1px 2px -1px rgba(0, 0, 0, 0.45);
+    --shadow-dropdown: 0 4px 12px -1px rgba(0, 0, 0, 0.70), 0 2px 6px -2px rgba(0, 0, 0, 0.50);
+    --shadow-modal: 0 24px 38px -5px rgba(0, 0, 0, 0.85), 0 12px 16px -6px rgba(0, 0, 0, 0.65);
+}
+

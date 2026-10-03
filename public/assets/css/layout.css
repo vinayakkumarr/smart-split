@@ -1,0 +1,558 @@
+/**
+ * Smart Split V2 – Institutional Financial Workspace Layout System
+ * Principles: Crisp Grid Alignment, Asymmetric High-Density Columns, Clear Visual Focus
+ */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    accent-color: var(--brand-primary);
+    color-scheme: light;
+}
+
+[data-theme="dark"] html,
+[data-theme="dark"] {
+    accent-color: var(--brand-primary);
+    color-scheme: dark;
+}
+
+::selection {
+    background-color: var(--brand-primary-soft);
+    color: var(--brand-primary);
+}
+
+::-moz-selection {
+    background-color: var(--brand-primary-soft);
+    color: var(--brand-primary);
+}
+
+[data-theme="dark"] ::selection {
+    background-color: rgba(16, 185, 129, 0.3);
+    color: #F8FAFC;
+}
+
+[data-theme="dark"] ::-moz-selection {
+    background-color: rgba(16, 185, 129, 0.3);
+    color: #F8FAFC;
+}
+
+body {
+    font-family: var(--font-ui);
+    background-color: var(--canvas-bg);
+    color: var(--text-primary);
+    line-height: 1.5;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    width: 100%;
+}
+
+/* -----------------------------------------------------------------------------
+ * 1. Executive Top Navigation Bar (Mature Light-First Financial Header)
+ * ----------------------------------------------------------------------------- */
+.navbar {
+    background-color: var(--surface-primary);
+    border-bottom: 1px solid var(--border-color);
+    height: 64px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+}
+
+.navbar-inner {
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 var(--space-8);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    text-decoration: none;
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: -0.025em;
+    transition: opacity var(--transition-fast);
+}
+
+.brand:hover {
+    opacity: 0.85;
+}
+
+.brand-badge {
+    background: var(--brand-primary);
+    color: var(--text-inverse);
+    border-radius: var(--radius-xs);
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+
+.navbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.navbar-workspaces-btn {
+    background: var(--surface-secondary);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    box-sizing: border-box;
+    transition: all var(--transition-fast);
+    line-height: 1;
+    user-select: none;
+}
+
+.navbar-workspaces-btn:hover {
+    background: var(--surface-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+.navbar-workspaces-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--border-focus-ring);
+    border-color: var(--border-focus);
+}
+
+.navbar-theme-btn {
+    background: var(--surface-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    box-sizing: border-box;
+    transition: background-color 160ms cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 160ms cubic-bezier(0.4, 0, 0.2, 1),
+                color 160ms cubic-bezier(0.4, 0, 0.2, 1),
+                transform 120ms ease;
+    line-height: 1;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.navbar-theme-btn:hover {
+    background: var(--surface-tertiary);
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+.navbar-theme-btn:active {
+    background: var(--surface-tertiary);
+    transform: scale(0.95);
+}
+
+.navbar-theme-btn:focus,
+.navbar-theme-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--border-focus-ring);
+    border-color: var(--border-focus);
+}
+
+.theme-toggle-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    line-height: 0;
+}
+
+.theme-toggle-svg {
+    display: block;
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+    color: currentColor;
+    pointer-events: none;
+}
+
+/* Dark Theme SVG Logo & Transition Enhancements */
+[data-theme="dark"] .ss-logo-interactive text tspan:first-child {
+    fill: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .ss-logo-interactive text tspan:last-child {
+    fill: var(--brand-primary) !important;
+}
+
+[data-theme="dark"] .ss-logo-interactive .ss-wing-top {
+    fill: var(--brand-primary) !important;
+}
+
+[data-theme="dark"] .ss-logo-interactive .ss-wing-bot {
+    fill: var(--text-primary) !important;
+}
+
+.navbar-chip {
+    background: var(--surface-secondary);
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    height: 32px;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-weight: 500;
+    box-sizing: border-box;
+    line-height: 1;
+}
+
+.navbar-chip-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background-color: var(--financial-credit);
+    flex-shrink: 0;
+}
+
+.navbar-auth-container {
+    display: inline-flex;
+    align-items: center;
+}
+
+.navbar-auth-container .btn {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 11px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    line-height: 1;
+}
+
+/* -----------------------------------------------------------------------------
+ * 2. Main Workspace Container
+ * ----------------------------------------------------------------------------- */
+.main-container {
+    flex: 1;
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: var(--space-8) var(--space-8) var(--space-16) var(--space-8);
+}
+
+/* -----------------------------------------------------------------------------
+ * 3. 2-Column Financial Workspace Grid
+ * ----------------------------------------------------------------------------- */
+.workspace-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+    align-items: start;
+}
+
+@media (min-width: 960px) {
+    .workspace-grid {
+        grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+        gap: var(--space-5);
+    }
+}
+
+.workspace-col-primary,
+.workspace-col-secondary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+}
+
+/* -----------------------------------------------------------------------------
+ * 4. Executive Header Bar
+ * ----------------------------------------------------------------------------- */
+.executive-summary-bar {
+    background: var(--surface-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--space-4) var(--space-5);
+    margin-bottom: var(--space-4);
+    box-shadow: var(--shadow-subtle);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+@media (min-width: 768px) {
+    .executive-summary-bar {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+}
+
+.exec-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.exec-title-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.exec-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+}
+
+.exec-header-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.exec-header-stats {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-4);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.exec-stat-box {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.exec-stat-budget {
+    min-width: 140px;
+    flex: 1 1 auto;
+}
+
+@media (min-width: 768px) {
+    .exec-header-stats {
+        align-items: center;
+        flex-wrap: nowrap;
+        gap: var(--space-5);
+        padding-top: 0;
+        border-top: none;
+    }
+
+    .exec-stat-budget {
+        min-width: 175px;
+        flex: initial;
+    }
+}
+
+.exec-stat-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.exec-stat-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+}
+
+.exec-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+/* -----------------------------------------------------------------------------
+ * 5. Mobile Quick Action Bar & Navigation (Docked Bottom Bar)
+ * ----------------------------------------------------------------------------- */
+.mobile-bottom-bar {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface-primary);
+    border-top: 1px solid var(--border-color);
+    padding: var(--space-2) var(--space-3);
+    z-index: 40;
+    box-shadow: 0 -2px 10px rgba(23, 26, 25, 0.05);
+}
+
+@media (max-width: 768px) {
+    .mobile-bottom-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-around;
+        gap: var(--space-1);
+    }
+    
+    body {
+        padding-bottom: 70px;
+    }
+
+    .main-container {
+        padding-bottom: calc(var(--space-10) + 20px);
+    }
+}
+
+.mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: var(--font-size-2xs);
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 8px;
+    min-width: 52px;
+    min-height: 44px;
+    border-radius: var(--radius-xs);
+    transition: all var(--transition-fast);
+}
+
+.mobile-nav-item:hover,
+.mobile-nav-item:active {
+    color: var(--text-primary);
+    background: var(--surface-secondary);
+}
+
+.mobile-nav-item-icon {
+    font-size: 1.15rem;
+    line-height: 1;
+}
+
+.mobile-nav-item-primary {
+    background: var(--brand-primary);
+    color: var(--text-inverse);
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    box-shadow: var(--shadow-subtle);
+}
+
+.mobile-nav-item-primary:hover,
+.mobile-nav-item-primary:active {
+    background: var(--brand-primary-hover);
+    color: var(--text-inverse);
+}
+
+/* -----------------------------------------------------------------------------
+ * 6. Utility Helper Classes
+ * ----------------------------------------------------------------------------- */
+.flex-row-between {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.flex-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.flex-col {
+    display: flex;
+    flex-direction: column;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+}
+
+@media (min-width: 640px) {
+    .grid-2 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.gap-sm { gap: var(--space-2); }
+.gap-md { gap: var(--space-3); }
+.gap-lg { gap: var(--space-4); }
+
+.tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    font-family: var(--font-mono);
+}
+
+.kbd-badge {
+    background: rgba(15, 23, 42, 0.08);
+    color: var(--text-muted);
+    border: 1px solid var(--border-color);
+    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-left: 4px;
+}

@@ -1,0 +1,37 @@
+# Environment variables
+.env
+.env.backup
+.env.production
+.env.*
+!.env.example
+
+# Dependency directories
+/vendor/
+/node_modules/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# IDE configuration
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and cache
+/logs/
+*.log
+
+# Uploaded files and receipt attachments
+/storage/receipts/*
+!/storage/receipts/.gitkeep
+
+# Test outputs & Playwright artifacts
+/test-results/
+/playwright-report/
+/tests/e2e/reports/
+/.last-run.json
+
+# Temporary development & audit scratch directory
+/scratch/
