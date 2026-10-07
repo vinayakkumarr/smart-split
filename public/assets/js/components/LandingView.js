@@ -35,16 +35,22 @@ export class LandingView {
      * @param {Object} group
      */
     static saveWorkspace(group) {
-        if (!group || !group.invite_token) return;
+        if (!group) return;
+        const token = group.invite_token || group.token;
+        if (!token) return;
         try {
-            const list = LandingView.getRecentWorkspaces().filter(w => w.token !== group.invite_token);
+            const list = LandingView.getRecentWorkspaces().filter(w => w.token !== token);
+            const isOwner = Boolean(group.is_owner || group.isOwner);
+            const memberName = group.member_name || group.memberName || null;
             list.unshift({
-                token: group.invite_token,
+                token: token,
                 name: group.name,
                 currency: group.currency_code || group.currency || 'INR',
-                lastAccessed: Date.now(),
+                lastAccessed: group.lastAccessed || (group.created_at ? new Date(group.created_at).getTime() : Date.now()),
+                ...(isOwner ? { isOwner: true } : {}),
+                ...(memberName ? { memberName } : {}),
             });
-            localStorage.setItem('smartsplit_workspaces', JSON.stringify(list.slice(0, 10)));
+            localStorage.setItem('smartsplit_workspaces', JSON.stringify(list.slice(0, 20)));
         } catch {
             // Ignore storage errors
         }
@@ -151,14 +157,12 @@ export class LandingView {
     }
 
     /**
-     * Open the Workspaces Hub modal showing recently visited groups with quick switcher and consolidated net financial summary.
+     * Fetch cloud workspaces (if authenticated) and merge with local workspaces.
+     * @returns {Promise<Array<{token: string, name: string, currency: string, lastAccessed: number, isCloud: boolean, isOwner: boolean, memberName: string|null, netBalanceCents: number|null}>>}
      */
-    /**
-     * Open the Workspaces Hub modal showing recently visited & cloud groups with quick switcher and consolidated net financial summary.
-     */
-    static async openWorkspacesModal() {
-        const isAuthenticated = Boolean(store.getState().isAuthenticated);
-        const currentUser = store.getState().currentUser;
+    static async fetchAndMergeWorkspaces() {
+        const isAuthenticated = Boolean(store.getState()?.isAuthenticated);
+        const currentUser = store.getState()?.currentUser;
         const localWorkspaces = LandingView.getRecentWorkspaces();
         let cloudWorkspaces = [];
 
@@ -175,17 +179,18 @@ export class LandingView {
         const mergedMap = new Map();
 
         cloudWorkspaces.forEach((cw) => {
-            const token = cw.invite_token;
+            const token = cw.invite_token || cw.token;
             if (token) {
+                LandingView.saveWorkspace(cw);
                 mergedMap.set(token, {
                     token,
                     name: cw.name,
-                    currency: cw.currency || 'INR',
-                    lastAccessed: cw.created_at ? new Date(cw.created_at).getTime() : Date.now(),
+                    currency: cw.currency_code || cw.currency || 'INR',
+                    lastAccessed: cw.lastAccessed || (cw.created_at ? new Date(cw.created_at).getTime() : Date.now()),
                     isCloud: true,
                     isOwner: Boolean(cw.is_owner || (currentUser && cw.owner_user_id === currentUser.id)),
                     memberName: cw.member_name || null,
-                    netBalanceCents: cw.net_balance_cents,
+                    netBalanceCents: cw.net_balance_cents !== undefined ? cw.net_balance_cents : null,
                     status: cw.status,
                 });
             }
@@ -194,7 +199,7 @@ export class LandingView {
         localWorkspaces.forEach((lw) => {
             if (!mergedMap.has(lw.token)) {
                 const creatorToken = typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${lw.token}`) : null;
-                const isCreator = Boolean(creatorToken);
+                const isCreator = Boolean(creatorToken || lw.isOwner || lw.isCreator);
                 mergedMap.set(lw.token, {
                     token: lw.token,
                     name: lw.name,
@@ -203,14 +208,22 @@ export class LandingView {
                     isCloud: false,
                     isOwner: isCreator,
                     isCreator: isCreator,
-                    memberName: null,
+                    memberName: lw.memberName || null,
                     netBalanceCents: null,
                     status: null,
                 });
             }
         });
 
-        const recentWorkspaces = Array.from(mergedMap.values());
+        return Array.from(mergedMap.values());
+    }
+
+    /**
+     * Open the Workspaces Hub modal showing recently visited & cloud groups with quick switcher and consolidated net financial summary.
+     */
+    static async openWorkspacesModal() {
+        const isAuthenticated = Boolean(store.getState()?.isAuthenticated);
+        const recentWorkspaces = await LandingView.fetchAndMergeWorkspaces();
         const baseCurrency = recentWorkspaces[0]?.currency || 'INR';
 
         const content = `
@@ -532,6 +545,81 @@ export class LandingView {
     }
 
     /**
+     * Asynchronously hydrate and render the workspaces list on the landing page.
+     * @param {HTMLElement} container
+     */
+    static async syncAndRenderWorkspaces(container) {
+        const mount = container.querySelector('#landing-workspaces-mount');
+        if (!mount) return;
+
+        try {
+            const isAuthenticated = Boolean(store.getState()?.isAuthenticated);
+            const workspaces = await LandingView.fetchAndMergeWorkspaces();
+
+            // Guard in case container was unmounted or replaced during async fetch
+            const currentMount = container.querySelector('#landing-workspaces-mount');
+            if (!currentMount) return;
+
+            if (workspaces.length === 0) {
+                currentMount.innerHTML = '';
+                return;
+            }
+
+            currentMount.innerHTML = `
+                <section class="landing-recents-directory">
+                    <div class="landing-recents-header">
+                        <div class="landing-recents-title">
+                            ${renderIcon(isAuthenticated ? 'cloud' : 'clock', { size: 14 })}
+                            <span>${isAuthenticated ? 'Your Workspaces (Cloud Synced)' : 'Recent Workspaces'}</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: var(--space-2);">
+                            <span class="badge badge-settled badge-mono">${workspaces.length} ${workspaces.length === 1 ? 'Workspace' : 'Workspaces'}</span>
+                            <button type="button" class="btn btn-ghost btn-xs" id="btn-landing-open-hub" style="font-size: var(--font-size-2xs); padding: 2px 8px; font-weight: 600; color: var(--brand-primary); display: inline-flex; align-items: center; gap: 4px;">
+                                ${renderIcon('externalLink', { size: 11 })}
+                                <span>Hub Summary</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="landing-recents-list">
+                        ${workspaces.map(w => `
+                            <a href="#/g/${escapeHtml(w.token)}" class="landing-recents-row">
+                                <div class="landing-recents-info">
+                                    <span class="landing-recents-icon">${renderIcon(w.isCloud ? 'cloud' : 'folder', { size: 14 })}</span>
+                                    <span class="landing-recents-name">${escapeHtml(w.name)}</span>
+                                    <span class="badge badge-settled badge-mono" style="font-size: var(--font-size-2xs); padding: 1px 6px;">${escapeHtml(w.currency || 'INR')}</span>
+                                    ${w.isOwner ? `<span class="badge badge-mono badge-owner" style="font-size: var(--font-size-2xs); background: rgba(234, 179, 8, 0.12); color: #92400e; border: 1px solid rgba(234, 179, 8, 0.28); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('crown', { size: 10 })} ${w.isCloud ? 'Owner' : 'Organizer'}</span>` : ''}
+                                    ${w.memberName ? `<span class="badge badge-mono badge-member" style="font-size: var(--font-size-2xs); background: var(--brand-primary-soft, #E8F0EC); color: var(--brand-primary, #18352B); border: 1px solid var(--brand-accent-border, #C9D0CB); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('user', { size: 10 })} ${escapeHtml(w.memberName)}</span>` : ''}
+                                    ${w.isCloud ? `<span class="badge badge-mono badge-cloud" style="font-size: var(--font-size-2xs); background: var(--financial-credit-bg, #E8F5F1); color: var(--financial-credit-text, #065A43); border: 1px solid var(--financial-credit-border, #B6E2D5); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('check', { size: 10 })} Synced</span>` : ''}
+                                </div>
+                                <div class="landing-recents-meta">
+                                    <span class="landing-recents-date">
+                                        ${new Date(w.lastAccessed || Date.now()).toLocaleDateString()}
+                                    </span>
+                                    <span class="landing-recents-open">
+                                        <span>Open</span>
+                                        <span class="landing-recents-arrow">${renderIcon('arrowRight', { size: 12 })}</span>
+                                    </span>
+                                </div>
+                            </a>
+                        `).join('')}
+                    </div>
+                </section>
+            `;
+
+            const hubBtn = currentMount.querySelector('#btn-landing-open-hub');
+            if (hubBtn) {
+                hubBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    LandingView.openWorkspacesModal();
+                });
+            }
+        } catch {
+            // Silently fall back to already rendered local storage items
+        }
+    }
+
+    /**
      * Render the landing page with group creation form and recent workspaces hub.
      * @param {HTMLElement} container
      */
@@ -651,38 +739,40 @@ export class LandingView {
                     </div>
                 </section>
 
-                <!-- Recent Workspaces Directory (If present) -->
-                ${recentWorkspaces.length > 0 ? `
-                    <section class="landing-recents-directory">
-                        <div class="landing-recents-header">
-                            <div class="landing-recents-title">
-                                ${renderIcon('clock', { size: 14 })}
-                                <span>Recent Workspaces</span>
+                <!-- Dynamic Workspaces Directory Mount (Cloud + Local Auto-Sync) -->
+                <div id="landing-workspaces-mount">
+                    ${recentWorkspaces.length > 0 ? `
+                        <section class="landing-recents-directory">
+                            <div class="landing-recents-header">
+                                <div class="landing-recents-title">
+                                    ${renderIcon('clock', { size: 14 })}
+                                    <span>Recent Workspaces</span>
+                                </div>
+                                <span class="badge badge-settled badge-mono">${recentWorkspaces.length} ${recentWorkspaces.length === 1 ? 'Workspace' : 'Workspaces'}</span>
                             </div>
-                            <span class="badge badge-settled badge-mono">${recentWorkspaces.length} ${recentWorkspaces.length === 1 ? 'Workspace' : 'Workspaces'}</span>
-                        </div>
-                        <div class="landing-recents-list">
-                            ${recentWorkspaces.map(w => `
-                                <a href="#/g/${w.token}" class="landing-recents-row">
-                                    <div class="landing-recents-info">
-                                        <span class="landing-recents-icon">${renderIcon('folder', { size: 14 })}</span>
-                                        <span class="landing-recents-name">${escapeHtml(w.name)}</span>
-                                        <span class="badge badge-settled badge-mono" style="font-size: var(--font-size-2xs); padding: 1px 6px;">${escapeHtml(w.currency || 'INR')}</span>
-                                    </div>
-                                    <div class="landing-recents-meta">
-                                        <span class="landing-recents-date">
-                                            ${new Date(w.lastAccessed || Date.now()).toLocaleDateString()}
-                                        </span>
-                                        <span class="landing-recents-open">
-                                            <span>Open</span>
-                                            <span class="landing-recents-arrow">${renderIcon('arrowRight', { size: 12 })}</span>
-                                        </span>
-                                    </div>
-                                </a>
-                            `).join('')}
-                        </div>
-                    </section>
-                ` : ''}
+                            <div class="landing-recents-list">
+                                ${recentWorkspaces.map(w => `
+                                    <a href="#/g/${w.token}" class="landing-recents-row">
+                                        <div class="landing-recents-info">
+                                            <span class="landing-recents-icon">${renderIcon('folder', { size: 14 })}</span>
+                                            <span class="landing-recents-name">${escapeHtml(w.name)}</span>
+                                            <span class="badge badge-settled badge-mono" style="font-size: var(--font-size-2xs); padding: 1px 6px;">${escapeHtml(w.currency || 'INR')}</span>
+                                        </div>
+                                        <div class="landing-recents-meta">
+                                            <span class="landing-recents-date">
+                                                ${new Date(w.lastAccessed || Date.now()).toLocaleDateString()}
+                                            </span>
+                                            <span class="landing-recents-open">
+                                                <span>Open</span>
+                                                <span class="landing-recents-arrow">${renderIcon('arrowRight', { size: 12 })}</span>
+                                            </span>
+                                        </div>
+                                    </a>
+                                `).join('')}
+                            </div>
+                        </section>
+                    ` : ''}
+                </div>
 
                 <!-- Value Pillars -->
                 <section class="landing-section">
@@ -738,6 +828,9 @@ export class LandingView {
         if (footerMount) {
             Footer.renderLandingFooter(footerMount);
         }
+
+        // Asynchronously sync and render latest cloud + local workspaces
+        LandingView.syncAndRenderWorkspaces(container);
 
         const landingPairBtn = container.querySelector('#btn-landing-pair-device');
         if (landingPairBtn) {
