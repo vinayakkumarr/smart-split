@@ -344,9 +344,15 @@ if (preg_match('/\.(png|jpg|jpeg|webp|pdf|svg|css|js|map|ico|txt|json)$/i', $req
         </nav>
 
         <main class="main-container" id="main-content">
-            <div class="flex-center" style="min-height: 200px;">
+            <div class="flex-center" style="min-height: 200px; flex-direction: column; gap: var(--space-3);" id="app-startup-loader">
                 <div class="badge badge-settled">Loading Smart Split...</div>
             </div>
+            <noscript>
+                <div class="panel" style="text-align: center; max-width: 420px; margin: 40px auto; padding: 24px;">
+                    <p style="color: var(--financial-debt); font-weight: 700; margin-bottom: 8px;">JavaScript Required</p>
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">Smart Split requires JavaScript to manage the real-time financial ledger. Please enable JavaScript in your browser.</p>
+                </div>
+            </noscript>
         </main>
     </div>
 
@@ -354,7 +360,22 @@ if (preg_match('/\.(png|jpg|jpeg|webp|pdf|svg|css|js|map|ico|txt|json)$/i', $req
     <div id="modal-overlay" class="modal-overlay"></div>
     <div id="toast-container"></div>
 
-    <script type="module" src="/assets/js/app.js"></script>
-    <script src="/assets/js/pwa-init.js"></script>
+    <script>
+        // Defensive Startup Boundary: If modules fail to initialize within 5s, provide 1-click recovery
+        window.__smartSplitStartupTimer = setTimeout(function() {
+            var loader = document.getElementById('app-startup-loader');
+            if (loader && loader.parentElement) {
+                loader.innerHTML = '<div class="panel" style="text-align: center; max-width: 440px; margin: 30px auto; padding: 24px; border: 1px solid var(--border-color, #334155); border-radius: 8px;">' +
+                    '<p style="font-weight: 700; font-size: 0.95rem; margin-bottom: 8px; color: var(--text-primary, #f8fafc);">Workspace Taking Longer Than Usual</p>' +
+                    '<p style="color: var(--text-muted, #94a3b8); font-size: 0.8rem; margin-bottom: 16px; line-height: 1.4;">A cached browser asset may need refreshing to sync with the latest ledger engine.</p>' +
+                    '<div style="display: flex; gap: 8px; justify-content: center;">' +
+                    '<button type="button" class="btn btn-primary btn-sm" onclick="if(\'serviceWorker\' in navigator){navigator.serviceWorker.getRegistrations().then(function(r){for(var i=0;i<r.length;i++){r[i].unregister();}});if(window.caches){caches.keys().then(function(k){for(var j=0;j<k.length;j++){caches.delete(k[j]);}});}}window.location.reload(true);" style="padding: 6px 14px; font-weight: 700; cursor: pointer;">Reload & Refresh Cache</button>' +
+                    '</div>' +
+                '</div>';
+            }
+        }, 5000);
+    </script>
+    <script type="module" src="/assets/js/app.js?v=2.0.1"></script>
+    <script src="/assets/js/pwa-init.js?v=2.0.1"></script>
 </body>
 </html>

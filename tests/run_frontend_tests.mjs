@@ -15,6 +15,52 @@ console.log('\n=================================================================
 console.log(' SMART SPLIT: FRONTEND ES6 SUITES RUNNER');
 console.log('================================================================================\n');
 
+// 0. Automated Static Syntax & Module Compilation Gate
+console.log('--- Phase 0: Automated Static Syntax & Module Compilation Gate ---');
+const jsDir = join(dirname(__dirname), 'public', 'assets', 'js');
+function getAllJsFiles(dir) {
+    let results = [];
+    const list = fs.readdirSync(dir);
+    for (const file of list) {
+        const full = join(dir, file);
+        const stat = fs.statSync(full);
+        if (stat && stat.isDirectory()) {
+            results = results.concat(getAllJsFiles(full));
+        } else if (file.endsWith('.js')) {
+            results.push(full);
+        }
+    }
+    return results;
+}
+
+const allJsFiles = getAllJsFiles(jsDir);
+let syntaxErrors = 0;
+
+for (const jsFile of allJsFiles) {
+    const relName = jsFile.replace(dirname(__dirname) + '\\', '').replace(dirname(__dirname) + '/', '');
+    const code = fs.readFileSync(jsFile, 'utf-8');
+    const checkRes = spawnSync(process.execPath, ['--input-type=module', '--check'], {
+        input: code,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+    });
+
+    if (checkRes.status === 0) {
+        console.log(`  [SYNTAX OK] ${relName}`);
+    } else {
+        console.error(`  [SYNTAX FAIL] ${relName}`);
+        console.error(`         ${checkRes.stderr.trim().split('\n').slice(0, 5).join('\n         ')}`);
+        syntaxErrors++;
+    }
+}
+
+if (syntaxErrors > 0) {
+    console.error(`\n[FATAL] ${syntaxErrors} JavaScript file(s) failed static syntax check. Aborting test execution.`);
+    process.exit(1);
+}
+console.log(`  All ${allJsFiles.length} JavaScript module files statically verified with 0 syntax errors.\n`);
+console.log('--- Phase 1: Executing Frontend Functional Test Suites ---');
+
 const testSuites = [
     { file: 'test_client_core.mjs', desc: 'Client Math, Reactive Store & State Engine' },
     { file: 'test_frontend_financial_invariants.mjs', desc: 'Frontend Financial Invariants & Client Utilities' },

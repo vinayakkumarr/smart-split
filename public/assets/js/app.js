@@ -57,6 +57,9 @@ window.SmartSplit = {
 };
 
 console.log('Smart Split Financial Workspace initialized.');
+if (typeof window !== 'undefined' && window.__smartSplitStartupTimer) {
+    clearTimeout(window.__smartSplitStartupTimer);
+}
 
 const mainContent = document.getElementById('main-content');
 
@@ -417,12 +420,6 @@ function renderApp(state) {
             };
         }
 
-        const headerContainer = mainContent.querySelector('#group-header-container');
-        const expenseContainer = mainContent.querySelector('#expense-list-container');
-        const memberContainer = mainContent.querySelector('#member-list-container');
-        const balanceContainer = mainContent.querySelector('#balance-summary-container');
-        const settlementContainer = mainContent.querySelector('#settlement-plan-container');
-
         if (headerContainer) {
             GroupHeader.render(headerContainer, group, {
                 totalSpendCents,
@@ -469,7 +466,6 @@ function renderApp(state) {
             });
         }
 
-        const wsFooterContainer = mainContent.querySelector('#workspace-footer-container');
         if (wsFooterContainer) {
             Footer.renderWorkspaceBar(wsFooterContainer, { currency });
         }
