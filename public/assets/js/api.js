@@ -3,6 +3,58 @@ import { Toast } from './components/Toast.js';
 class ApiClient {
     constructor(baseUrl = '/api') {
         this.baseUrl = baseUrl;
+        this.recentMutations = new Map();
+    }
+
+    /**
+     * Track a locally initiated mutation to prevent redundant SSE self-echoes.
+     * @param {string} type e.g. 'expense.created', 'expense.updated'
+     * @param {number|string|null} [entityId]
+     * @param {number|null} [version]
+     */
+    recordMutation(type, entityId = null, version = null) {
+        const now = Date.now();
+        if (entityId !== null && entityId !== undefined) {
+            this.recentMutations.set(`${type}:${entityId}`, now);
+            if (version !== null && version !== undefined) {
+                this.recentMutations.set(`${type}:${entityId}:${version}`, now);
+            }
+        }
+        this.recentMutations.set(`${type}:any`, now);
+
+        // Garbage collect entries older than 10 seconds
+        for (const [key, ts] of this.recentMutations.entries()) {
+            if (now - ts > 10000) {
+                this.recentMutations.delete(key);
+            }
+        }
+    }
+
+    /**
+     * Check if an incoming SSE event was triggered by this client tab's own local mutation.
+     * @param {Object} eventData { type, entity_id, version }
+     * @returns {boolean}
+     */
+    isSelfMutation(eventData) {
+        if (!eventData || !eventData.type) return false;
+        const now = Date.now();
+        const type = eventData.type;
+        const entityId = eventData.entity_id;
+        const version = eventData.version;
+
+        if (entityId !== null && entityId !== undefined) {
+            if (version !== null && version !== undefined) {
+                const tsVer = this.recentMutations.get(`${type}:${entityId}:${version}`);
+                if (tsVer && (now - tsVer < 5000)) return true;
+            }
+            const tsId = this.recentMutations.get(`${type}:${entityId}`);
+            if (tsId && (now - tsId < 5000)) return true;
+        }
+
+        const tsType = this.recentMutations.get(`${type}:any`);
+        if (tsType && (now - tsType < 3000)) return true;
+
+        return false;
     }
 
     /**
@@ -218,6 +270,14 @@ class ApiClient {
     }
 
     /**
+     * Get consolidated workspace dataset (group, members, balances, settlement plan, expenses, settlements) in 1 request.
+     * @param {string} token
+     */
+    async getWorkspace(token) {
+        return this.request(`/groups/${encodeURIComponent(token)}/workspace`);
+    }
+
+    /**
      * Delete a workspace / group permanently.
      * @param {string} token
      */
@@ -267,10 +327,14 @@ class ApiClient {
      * Add a member to the group.
      */
     async addMember(token, name) {
-        return this.request(`/groups/${encodeURIComponent(token)}/members`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/members`, {
             method: 'POST',
             body: { name },
         });
+        if (res?.data?.member?.id) {
+            this.recordMutation('member.created', res.data.member.id);
+        }
+        return res;
     }
 
     /**
@@ -281,10 +345,12 @@ class ApiClient {
      */
     async updateMember(token, memberId, data) {
         const body = typeof data === 'string' ? { name: data } : (data || {});
-        return this.request(`/groups/${encodeURIComponent(token)}/members/${memberId}`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/members/${memberId}`, {
             method: 'PUT',
             body,
         });
+        this.recordMutation('member.updated', memberId);
+        return res;
     }
 
     /**
@@ -293,9 +359,11 @@ class ApiClient {
      * @param {number} memberId
      */
     async deleteMember(token, memberId) {
-        return this.request(`/groups/${encodeURIComponent(token)}/members/${memberId}`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/members/${memberId}`, {
             method: 'DELETE',
         });
+        this.recordMutation('member.deleted', memberId);
+        return res;
     }
 
     /**
@@ -318,21 +386,27 @@ class ApiClient {
         if (idempotencyKey) {
             headers['X-Idempotency-Key'] = idempotencyKey;
         }
-        return this.request(`/groups/${encodeURIComponent(token)}/expenses`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/expenses`, {
             method: 'POST',
             body: payload,
             headers,
         });
+        if (res?.data?.expense?.id) {
+            this.recordMutation('expense.created', res.data.expense.id, res.data.expense.version);
+        }
+        return res;
     }
 
     /**
      * Update an existing expense.
      */
     async updateExpense(token, expenseId, payload) {
-        return this.request(`/groups/${encodeURIComponent(token)}/expenses/${expenseId}`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/expenses/${expenseId}`, {
             method: 'PUT',
             body: payload,
         });
+        this.recordMutation('expense.updated', expenseId, res?.data?.expense?.version);
+        return res;
     }
 
     /**
@@ -363,9 +437,11 @@ class ApiClient {
      * Soft-delete an expense.
      */
     async deleteExpense(token, expenseId) {
-        return this.request(`/groups/${encodeURIComponent(token)}/expenses/${expenseId}`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/expenses/${expenseId}`, {
             method: 'DELETE',
         });
+        this.recordMutation('expense.deleted', expenseId);
+        return res;
     }
 
     /**
@@ -382,9 +458,11 @@ class ApiClient {
      * @param {number} expenseId
      */
     async restoreExpense(token, expenseId) {
-        return this.request(`/groups/${encodeURIComponent(token)}/expenses/${expenseId}/restore`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/expenses/${expenseId}/restore`, {
             method: 'PUT',
         });
+        this.recordMutation('expense.restored', expenseId);
+        return res;
     }
 
     // --- Balances, Analytics & Settlements API ---
@@ -442,10 +520,14 @@ class ApiClient {
      * Record a direct debt payment settlement.
      */
     async createSettlement(token, payload) {
-        return this.request(`/groups/${encodeURIComponent(token)}/settlements`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/settlements`, {
             method: 'POST',
             body: payload,
         });
+        if (res?.data?.settlement?.id) {
+            this.recordMutation('settlement.created', res.data.settlement.id);
+        }
+        return res;
     }
 
     /**
@@ -468,9 +550,11 @@ class ApiClient {
      * @param {number} settlementId
      */
     async confirmSettlement(token, settlementId) {
-        return this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}/confirm`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}/confirm`, {
             method: 'POST',
         });
+        this.recordMutation('settlement.confirmed', settlementId);
+        return res;
     }
 
     /**
@@ -480,10 +564,12 @@ class ApiClient {
      * @param {string} [reason]
      */
     async disputeSettlement(token, settlementId, reason = '') {
-        return this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}/dispute`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}/dispute`, {
             method: 'POST',
             body: { reason },
         });
+        this.recordMutation('settlement.disputed', settlementId);
+        return res;
     }
 
     /**
@@ -493,19 +579,23 @@ class ApiClient {
      * @param {string} [reason]
      */
     async reverseSettlement(token, settlementId, reason = '') {
-        return this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}/reverse`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}/reverse`, {
             method: 'POST',
             body: { reason },
         });
+        this.recordMutation('settlement.reversed', settlementId);
+        return res;
     }
 
     /**
      * Soft-delete a settlement.
      */
     async deleteSettlement(token, settlementId) {
-        return this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}`, {
+        const res = await this.request(`/groups/${encodeURIComponent(token)}/settlements/${settlementId}`, {
             method: 'DELETE',
         });
+        this.recordMutation('settlement.deleted', settlementId);
+        return res;
     }
 
     // --- Recurring Schedules API ---

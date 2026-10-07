@@ -1532,7 +1532,7 @@ export class ExpenseModal {
                             Toast.info('Transaction queued offline. Will sync automatically when connected.');
                         }
                         if (typeof onSuccess === 'function') {
-                            await onSuccess();
+                            Promise.resolve().then(() => onSuccess()).catch(() => {});
                         }
                         return;
                     }
@@ -1569,7 +1569,7 @@ export class ExpenseModal {
                         }
                     }
                     if (typeof onSuccess === 'function') {
-                        await onSuccess();
+                        Promise.resolve().then(() => onSuccess()).catch(() => {});
                     }
                 } catch (err) {
                     if (err.code === 'NETWORK_OFFLINE' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
@@ -1581,7 +1581,7 @@ export class ExpenseModal {
                             Toast.info('Transaction queued offline. Will sync automatically when connected.');
                         }
                         if (typeof onSuccess === 'function') {
-                            await onSuccess();
+                            Promise.resolve().then(() => onSuccess()).catch(() => {});
                         }
                         return;
                     }

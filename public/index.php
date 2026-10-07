@@ -204,6 +204,7 @@ $router->delete('/api/user/account', [\App\Controllers\AuthController::class, 'd
 
 // Group Endpoints
 $router->post('/api/groups', [\App\Controllers\GroupController::class, 'create']);
+$router->get('/api/groups/{token}/workspace', [\App\Controllers\GroupController::class, 'workspace']);
 $router->get('/api/groups/{token}', [\App\Controllers\GroupController::class, 'show']);
 $router->delete('/api/groups/{token}', [\App\Controllers\GroupController::class, 'delete']);
 $router->post('/api/groups/{token}/creator-pairing', [\App\Controllers\GroupController::class, 'createPairingCode']);

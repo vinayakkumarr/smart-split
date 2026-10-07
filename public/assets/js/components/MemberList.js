@@ -126,9 +126,9 @@ export class MemberList {
                     await api.claimMember(token, memberId);
                     Toast.success(`Linked to ${memberName} successfully!`);
                     if (typeof onMemberAdded === 'function') {
-                        await onMemberAdded();
+                        Promise.resolve().then(() => onMemberAdded()).catch(() => {});
                     } else if (typeof window !== 'undefined' && window.SmartSplit?.refreshGroupData) {
-                        await window.SmartSplit.refreshGroupData(token);
+                        Promise.resolve().then(() => window.SmartSplit.refreshGroupData(token)).catch(() => {});
                     }
                 } catch (err) {
                     btn.disabled = false;
@@ -513,7 +513,7 @@ export class MemberList {
 
                 Toast.success(`Avatar updated for ${escapeHtml(member.name)}.`);
                 if (typeof onSaved === 'function') {
-                    await onSaved();
+                    Promise.resolve().then(() => onSaved()).catch(() => {});
                 }
             }
         });
@@ -613,7 +613,7 @@ export class MemberList {
 
                     Toast.success(`Added ${escapeHtml(newMember.name)} to workspace.`);
                     if (typeof onMemberAdded === 'function') {
-                        await onMemberAdded();
+                        Promise.resolve().then(() => onMemberAdded()).catch(() => {});
                     } else {
                         const currentMembers = store.getState().members || [];
                         store.setState({

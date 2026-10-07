@@ -28,6 +28,7 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
 
 # Copy PHP production configuration
 COPY docker/php.ini /usr/local/etc/php/conf.d/smartsplit.ini
+COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/zz-smartsplit.conf
 
 # Copy Nginx template configuration
 COPY docker/nginx.conf /etc/nginx/nginx.conf.template

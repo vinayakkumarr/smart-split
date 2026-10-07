@@ -127,31 +127,46 @@ export async function refreshGroupData(token) {
             store.setState({ isSyncing: true });
         }
 
-        // 2. Fire all data fetches concurrently in parallel (single network round trip)
-        const [groupRes, balancesRes, planRes, expensesRes, settlementsRes] = await Promise.all([
-            api.getGroup(token),
-            api.getBalances(token).catch(() => ({ data: { members: [] } })),
-            api.getSettlementPlan(token).catch(() => ({ data: { transactions: [] } })),
-            api.getExpenses(token).catch(() => ({ data: { expenses: [] } })),
-            api.getSettlements(token).catch(() => ({ data: { settlements: [] } })),
-        ]);
+        // 2. Fetch consolidated workspace payload in 1 single HTTP request (with multi-endpoint fallback)
+        let currentGroup, members, balances, settlementPlan, expenses, settlements;
 
-        if (groupRes?.data?.group) {
-            LandingView.saveWorkspace(groupRes.data.group);
+        try {
+            const wsRes = await api.getWorkspace(token);
+            if (wsRes?.data?.group) {
+                currentGroup = wsRes.data.group;
+                members = wsRes.data.members || [];
+                balances = wsRes.data.balances?.members || [];
+                settlementPlan = wsRes.data.settlement_plan || { transactions: [] };
+                expenses = wsRes.data.expenses || [];
+                settlements = wsRes.data.settlements || [];
+            }
+        } catch (wsErr) {
+            // Graceful fallback to concurrent multi-endpoint fetch if needed
+            const [groupRes, balancesRes, planRes, expensesRes, settlementsRes] = await Promise.all([
+                api.getGroup(token),
+                api.getBalances(token).catch(() => ({ data: { members: [] } })),
+                api.getSettlementPlan(token).catch(() => ({ data: { transactions: [] } })),
+                api.getExpenses(token).catch(() => ({ data: { expenses: [] } })),
+                api.getSettlements(token).catch(() => ({ data: { settlements: [] } })),
+            ]);
+
+            currentGroup = groupRes?.data?.group;
+            members = groupRes?.data?.members || [];
+            balances = balancesRes?.data?.members || [];
+            settlementPlan = planRes?.data || { transactions: [] };
+            expenses = expensesRes?.data?.expenses || [];
+            settlements = settlementsRes?.data?.settlements || [];
+        }
+
+        if (currentGroup) {
+            LandingView.saveWorkspace(currentGroup);
         }
 
         // 3. Silent non-blocking background evaluation for recurring rules
         api.evaluateRecurring(token).catch(() => {});
 
-        const currentGroup = groupRes.data.group;
-        const members = groupRes.data.members || [];
-        const balances = balancesRes.data.members || [];
-        const settlementPlan = planRes.data || { transactions: [] };
-        const expenses = expensesRes.data.expenses || [];
-        const settlements = settlementsRes.data.settlements || [];
-
         // Save local snapshot cache for offline viewing and instant subsequent loads
-        if (typeof localStorage !== 'undefined' && token) {
+        if (typeof localStorage !== 'undefined' && token && currentGroup) {
             try {
                 localStorage.setItem(`smartsplit_cache_${token}`, JSON.stringify({
                     group: currentGroup,
@@ -289,26 +304,44 @@ function renderApp(state) {
         const pendingTransfers = (state.settlementPlan?.transactions || []).length;
         const memberCount = (state.members || []).length;
 
-        // Structured 2-column Financial Workspace Layout
-        mainContent.innerHTML = `
-            <div id="group-header-container"></div>
-            
-            <div class="workspace-grid">
-                <!-- Left Column (Primary Ledger Table) -->
-                <div class="workspace-col-primary">
-                    <div id="expense-list-container"></div>
+        let headerContainer = mainContent.querySelector('#group-header-container');
+        let expenseContainer = mainContent.querySelector('#expense-list-container');
+        let memberContainer = mainContent.querySelector('#member-list-container');
+        let balanceContainer = mainContent.querySelector('#balance-summary-container');
+        let settlementContainer = mainContent.querySelector('#settlement-plan-container');
+        let wsFooterContainer = mainContent.querySelector('#workspace-footer-container');
+
+        const isMounted = headerContainer && expenseContainer && memberContainer && balanceContainer && settlementContainer;
+
+        if (!isMounted) {
+            // Structured 2-column Financial Workspace Layout
+            mainContent.innerHTML = `
+                <div id="group-header-container"></div>
+                
+                <div class="workspace-grid">
+                    <!-- Left Column (Primary Ledger Table) -->
+                    <div class="workspace-col-primary">
+                        <div id="expense-list-container"></div>
+                    </div>
+
+                    <!-- Right Column (Position Matrix & Settlement Router) -->
+                    <div class="workspace-col-secondary">
+                        <div id="member-list-container"></div>
+                        <div id="balance-summary-container"></div>
+                        <div id="settlement-plan-container"></div>
+                    </div>
                 </div>
 
-                <!-- Right Column (Position Matrix & Settlement Router) -->
-                <div class="workspace-col-secondary">
-                    <div id="member-list-container"></div>
-                    <div id="balance-summary-container"></div>
-                    <div id="settlement-plan-container"></div>
-                </div>
-            </div>
+                <div id="workspace-footer-container"></div>
+            `;
 
-            <div id="workspace-footer-container"></div>
-        `;
+            headerContainer = mainContent.querySelector('#group-header-container');
+            expenseContainer = mainContent.querySelector('#expense-list-container');
+            memberContainer = mainContent.querySelector('#member-list-container');
+            balanceContainer = mainContent.querySelector('#balance-summary-container');
+            settlementContainer = mainContent.querySelector('#settlement-plan-container');
+            wsFooterContainer = mainContent.querySelector('#workspace-footer-container');
+        }
 
         const triggerAddExpense = () => ExpenseModal.open({
             token,
@@ -343,24 +376,27 @@ function renderApp(state) {
             mobileBar.className = 'mobile-bottom-bar';
             document.body.appendChild(mobileBar);
         }
-        mobileBar.innerHTML = `
-            <button type="button" class="mobile-nav-item mobile-nav-item-primary" id="btn-mobile-add-expense" title="Add New Expense">
-                <span class="mobile-nav-item-icon">${renderIcon('plusCircle', { size: 18 })}</span>
-                <span>Expense</span>
-            </button>
-            <button type="button" class="mobile-nav-item" id="btn-mobile-analytics" title="Visual Spend Analytics">
-                <span class="mobile-nav-item-icon">${renderIcon('barChart2', { size: 18 })}</span>
-                <span>Analytics</span>
-            </button>
-            <button type="button" class="mobile-nav-item" id="btn-mobile-activity" title="Activity Audit Feed">
-                <span class="mobile-nav-item-icon">${renderIcon('clock', { size: 18 })}</span>
-                <span>Activity</span>
-            </button>
-            <button type="button" class="mobile-nav-item" id="btn-mobile-settle" title="Settlement Plan">
-                <span class="mobile-nav-item-icon">${renderIcon('zap', { size: 18 })}</span>
-                <span>Settle</span>
-            </button>
-        `;
+        if (!mobileBar.dataset.mounted) {
+            mobileBar.dataset.mounted = 'true';
+            mobileBar.innerHTML = `
+                <button type="button" class="mobile-nav-item mobile-nav-item-primary" id="btn-mobile-add-expense" title="Add New Expense">
+                    <span class="mobile-nav-item-icon">${renderIcon('plusCircle', { size: 18 })}</span>
+                    <span>Expense</span>
+                </button>
+                <button type="button" class="mobile-nav-item" id="btn-mobile-analytics" title="Visual Spend Analytics">
+                    <span class="mobile-nav-item-icon">${renderIcon('barChart2', { size: 18 })}</span>
+                    <span>Analytics</span>
+                </button>
+                <button type="button" class="mobile-nav-item" id="btn-mobile-activity" title="Activity Audit Feed">
+                    <span class="mobile-nav-item-icon">${renderIcon('clock', { size: 18 })}</span>
+                    <span>Activity</span>
+                </button>
+                <button type="button" class="mobile-nav-item" id="btn-mobile-settle" title="Settlement Plan">
+                    <span class="mobile-nav-item-icon">${renderIcon('zap', { size: 18 })}</span>
+                    <span>Settle</span>
+                </button>
+            `;
+        }
 
         const mobileAddBtn = mobileBar.querySelector('#btn-mobile-add-expense');
         if (mobileAddBtn) mobileAddBtn.onclick = () => triggerAddExpense();

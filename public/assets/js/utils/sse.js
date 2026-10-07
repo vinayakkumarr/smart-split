@@ -5,6 +5,8 @@
  * debounces event notifications, and provides a clean pub/sub hook for workspace live-sync.
  */
 
+import { api } from '../api.js';
+
 export class SSEManager {
     constructor() {
         this.eventSource = null;
@@ -83,9 +85,14 @@ export class SSEManager {
 
     /**
      * Handle incoming parsed event with debouncing to prevent UI churn during rapid mutations.
+     * Automatically filters out self-echoes from the current browser tab to eliminate duplicate data fetches.
      * @private
      */
     handleEvent(data, onEventCallback) {
+        // Self-Echo Deduplication: If this mutation was initiated locally by this tab,
+        // do not trigger a redundant background full-workspace re-fetch cascade.
+        const isSelf = api.isSelfMutation(data);
+
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
         }
@@ -99,7 +106,7 @@ export class SSEManager {
                 }
             });
 
-            if (typeof onEventCallback === 'function') {
+            if (!isSelf && typeof onEventCallback === 'function') {
                 try {
                     onEventCallback(data);
                 } catch (err) {
