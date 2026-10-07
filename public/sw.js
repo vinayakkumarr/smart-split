@@ -7,7 +7,7 @@
  * - Mutations (POST, PUT, DELETE): Unintercepted native network pass-through
  */
 
-const CACHE_NAME = 'smartsplit-static-v17';
+const CACHE_NAME = 'smartsplit-static-v18';
 
 const STATIC_PRECACHE_URLS = [
     '/',
