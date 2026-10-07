@@ -79,7 +79,12 @@ class Env
      */
     public static function get(string $key, mixed $default = null): mixed
     {
-        return self::$variables[$key] ?? $_ENV[$key] ?? $_SERVER[$key] ?? $default;
+        $val = self::$variables[$key] ?? $_ENV[$key] ?? $_SERVER[$key] ?? null;
+        if ($val !== null) {
+            return $val;
+        }
+        $envVal = getenv($key);
+        return ($envVal !== false) ? $envVal : $default;
     }
 
     /**
