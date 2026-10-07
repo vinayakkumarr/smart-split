@@ -556,3 +556,34 @@ body {
     border-radius: 3px;
     margin-left: 4px;
 }
+
+/* -----------------------------------------------------------------------------
+ * 14. Live Synchronization Indicator Badge
+ * ----------------------------------------------------------------------------- */
+@keyframes syncPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.85); }
+}
+
+.sync-indicator-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: var(--font-size-xs, 0.75rem);
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: var(--surface-secondary, #f1f5f9);
+    border: 1px solid var(--border-subtle, #e2e8f0);
+    line-height: 1.2;
+}
+
+.sync-indicator-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--brand-primary, #18352B);
+    animation: syncPulse 1.4s ease-in-out infinite;
+    display: inline-block;
+}

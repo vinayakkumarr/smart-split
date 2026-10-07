@@ -97,20 +97,51 @@ export async function initAuth() {
  */
 export async function refreshGroupData(token) {
     try {
-        const groupRes = await api.getGroup(token);
-        if (groupRes?.data?.group) {
-            LandingView.saveWorkspace(groupRes.data.group);
+        // 1. Optimistic Stale-While-Revalidate: If we have a local snapshot cache, render immediately (0ms)
+        let hasCache = false;
+        if (typeof localStorage !== 'undefined' && token) {
+            const cachedRaw = localStorage.getItem(`smartsplit_cache_${token}`);
+            if (cachedRaw) {
+                try {
+                    const cached = JSON.parse(cachedRaw);
+                    if (cached?.group) {
+                        hasCache = true;
+                        store.setState({
+                            currentGroup: cached.group,
+                            members: cached.members || [],
+                            balances: cached.balances || [],
+                            settlementPlan: cached.settlementPlan || { transactions: [] },
+                            expenses: cached.expenses || [],
+                            settlements: cached.settlements || [],
+                            isLoading: false,
+                            isSyncing: true,
+                        });
+                    }
+                } catch (cacheErr) {}
+            }
         }
 
-        // Auto-evaluate any due recurring rules silently in the background
-        await api.evaluateRecurring(token).catch(() => {});
+        if (!hasCache && !store.getState().currentGroup) {
+            store.setState({ isLoading: true, isSyncing: true });
+        } else {
+            store.setState({ isSyncing: true });
+        }
 
-        const [balancesRes, planRes, expensesRes, settlementsRes] = await Promise.all([
+        // 2. Fire all data fetches concurrently in parallel (single network round trip)
+        const [groupRes, balancesRes, planRes, expensesRes, settlementsRes] = await Promise.all([
+            api.getGroup(token),
             api.getBalances(token).catch(() => ({ data: { members: [] } })),
             api.getSettlementPlan(token).catch(() => ({ data: { transactions: [] } })),
             api.getExpenses(token).catch(() => ({ data: { expenses: [] } })),
             api.getSettlements(token).catch(() => ({ data: { settlements: [] } })),
         ]);
+
+        if (groupRes?.data?.group) {
+            LandingView.saveWorkspace(groupRes.data.group);
+        }
+
+        // 3. Silent non-blocking background evaluation for recurring rules
+        api.evaluateRecurring(token).catch(() => {});
 
         const currentGroup = groupRes.data.group;
         const members = groupRes.data.members || [];
@@ -119,7 +150,7 @@ export async function refreshGroupData(token) {
         const expenses = expensesRes.data.expenses || [];
         const settlements = settlementsRes.data.settlements || [];
 
-        // Save local snapshot cache for offline viewing
+        // Save local snapshot cache for offline viewing and instant subsequent loads
         if (typeof localStorage !== 'undefined' && token) {
             try {
                 localStorage.setItem(`smartsplit_cache_${token}`, JSON.stringify({
@@ -142,6 +173,7 @@ export async function refreshGroupData(token) {
             expenses,
             settlements,
             isLoading: false,
+            isSyncing: false,
             isOffline: false,
         });
     } catch (err) {

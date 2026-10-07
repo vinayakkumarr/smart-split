@@ -22,6 +22,7 @@ export class Store {
             currentUser: null,
             isAuthenticated: false,
             authLoading: true,
+            isSyncing: false,
             ...initialState,
         };
         this.listeners = new Set();

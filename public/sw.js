@@ -7,7 +7,7 @@
  * - Mutations (POST, PUT, DELETE): Unintercepted native network pass-through
  */
 
-const CACHE_NAME = 'smartsplit-static-v16';
+const CACHE_NAME = 'smartsplit-static-v17';
 
 const STATIC_PRECACHE_URLS = [
     '/',
@@ -29,10 +29,13 @@ const STATIC_PRECACHE_URLS = [
     '/assets/js/utils/qrcode.js',
     '/assets/js/utils/currency.js',
     '/assets/js/utils/theme.js',
+    '/assets/js/utils/preferences.js',
+    '/assets/js/utils/icons.js',
     '/assets/js/utils/offline.js',
     '/assets/js/components/Modal.js',
     '/assets/js/components/Toast.js',
     '/assets/js/components/LandingView.js',
+    '/assets/js/components/SettingsView.js',
     '/assets/js/components/GroupHeader.js',
     '/assets/js/components/ExpenseList.js',
     '/assets/js/components/ExpenseModal.js',

@@ -33,7 +33,7 @@ class AuthSessionMiddleware
         $tokenHash = hash('sha256', trim($sessionCookie));
 
         $stmt = $this->pdo->prepare("
-            SELECT u.`id`, u.`email`, u.`display_name`, u.`avatar_emoji`, u.`avatar_color`, u.`upi_id`, s.`id` AS `session_id`
+            SELECT u.`id`, u.`email`, u.`display_name`, u.`avatar_emoji`, u.`avatar_color`, u.`upi_id`, s.`id` AS `session_id`, s.`last_active_at`
             FROM `user_sessions` s
             JOIN `users` u ON s.`user_id` = u.`id`
             WHERE s.`session_token_hash` = :token_hash
@@ -55,13 +55,16 @@ class AuthSessionMiddleware
                 'session_id' => (int) $user['session_id'],
             ]);
 
-            // Lightweight session heartbeat update
-            $touchStmt = $this->pdo->prepare("
-                UPDATE `user_sessions` 
-                SET `last_active_at` = NOW() 
-                WHERE `id` = :id
-            ");
-            $touchStmt->execute([':id' => $user['session_id']]);
+            // Throttled session heartbeat: update at most once every 5 minutes (300s)
+            $lastActive = !empty($user['last_active_at']) ? strtotime((string) $user['last_active_at']) : 0;
+            if (time() - $lastActive > 300) {
+                $touchStmt = $this->pdo->prepare("
+                    UPDATE `user_sessions` 
+                    SET `last_active_at` = NOW() 
+                    WHERE `id` = :id
+                ");
+                $touchStmt->execute([':id' => $user['session_id']]);
+            }
         }
     }
 }

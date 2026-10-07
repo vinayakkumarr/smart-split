@@ -446,6 +446,7 @@ export class GroupHeader {
         const state = (typeof store !== 'undefined' && store.getState) ? store.getState() : {};
         const currentUser = state.currentUser;
         const isAuthenticated = Boolean(state.isAuthenticated);
+        const isSyncing = Boolean(state.isSyncing);
         const members = state.members || [];
         const myClaimedMember = (isAuthenticated && currentUser)
             ? members.find(m => m.user_id !== null && m.user_id !== undefined && Number(m.user_id) === Number(currentUser.id))
@@ -518,6 +519,12 @@ export class GroupHeader {
                     <div class="exec-title-row" style="display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;">
                         <h1 class="exec-title" style="margin-right: 4px;">${escapeHtml(group.name)}</h1>
                         <span class="badge badge-settled badge-mono">${escapeHtml(currency)}</span>
+                        ${isSyncing ? `
+                            <span class="sync-indicator-badge" title="Syncing fresh data with cloud...">
+                                <span class="sync-indicator-dot"></span>
+                                <span>Syncing</span>
+                            </span>
+                        ` : ''}
                         ${myClaimedMember ? `
                             <div id="claimed-identity-pill" style="display: inline-flex; align-items: center; gap: 6px; background: var(--brand-primary-soft, #E8F0EC); border: 1px solid var(--brand-accent-border, #C9D0CB); padding: 3px 10px; border-radius: var(--radius-xs, 4px); font-size: var(--font-size-xs, 0.75rem); font-weight: 600; color: var(--brand-primary, #18352B);">
                                 <span style="display: inline-flex; align-items: center; color: var(--brand-primary);">${renderIcon('shieldCheck', { size: 13 })}</span>
