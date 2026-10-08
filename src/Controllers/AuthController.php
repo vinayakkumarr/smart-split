@@ -958,7 +958,7 @@ class AuthController extends BaseController
         $userId = (int) $currentUser['id'];
 
         $stmt = $this->pdo->prepare("
-            SELECT DISTINCT g.`id`, g.`uuid`, g.`name`, g.`currency_code`, g.`invite_token`, g.`owner_user_id`, g.`created_at`,
+            SELECT DISTINCT g.`id`, g.`uuid`, g.`name`, g.`currency_code`, g.`invite_token`, g.`owner_user_id`, g.`created_at`, g.`updated_at`,
                    m.`id` AS `member_id`, m.`name` AS `member_name`
             FROM `groups` g
             LEFT JOIN `members` m ON m.`group_id` = g.`id` AND m.`user_id` = :uid1 AND m.`is_active` = 1
