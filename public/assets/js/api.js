@@ -4,6 +4,7 @@ class ApiClient {
     constructor(baseUrl = '/api') {
         this.baseUrl = baseUrl;
         this.recentMutations = new Map();
+        this.inFlightRequests = new Map();
     }
 
     /**
@@ -106,6 +107,23 @@ class ApiClient {
         }
     }
 
+    /**
+     * Deduplicate identical concurrent GET requests using in-flight Promises.
+     * @param {string} key Unique request key
+     * @param {Function} requestFn Factory function returning a Promise
+     * @returns {Promise<any>}
+     */
+    async dedupedGet(key, requestFn) {
+        if (this.inFlightRequests.has(key)) {
+            return this.inFlightRequests.get(key);
+        }
+        const promise = requestFn().finally(() => {
+            this.inFlightRequests.delete(key);
+        });
+        this.inFlightRequests.set(key, promise);
+        return promise;
+    }
+
     // --- Authentication & Session API ---
 
     /**
@@ -206,7 +224,7 @@ class ApiClient {
      * Get all workspaces owned by or linked to the authenticated user.
      */
     async getUserWorkspaces() {
-        return this.request('/user/workspaces');
+        return this.dedupedGet('/user/workspaces', () => this.request('/user/workspaces'));
     }
 
     /**
@@ -488,7 +506,9 @@ class ApiClient {
      * Get net balances and zero-sum verification.
      */
     async getBalances(token) {
-        return this.request(`/groups/${encodeURIComponent(token)}/balances`);
+        return this.dedupedGet(`/groups/${encodeURIComponent(token)}/balances`, () =>
+            this.request(`/groups/${encodeURIComponent(token)}/balances`)
+        );
     }
 
     /**

@@ -156,6 +156,10 @@ export class LandingView {
         };
     }
 
+    static reconciledTokens = new Set();
+    static inFlightReconcile = null;
+    static lastReconciledUserId = null;
+
     /**
      * Reconcile and claim local guest-created workspaces for the authenticated user.
      * Iterates over local workspaces that have creator tokens and links them to the account.
@@ -163,33 +167,55 @@ export class LandingView {
      */
     static async reconcileLocalWorkspaces() {
         const isAuthenticated = Boolean(store.getState()?.isAuthenticated);
+        const currentUserId = store.getState()?.currentUser?.id || null;
         if (!isAuthenticated) return 0;
 
-        const localWorkspaces = LandingView.getRecentWorkspaces();
-        let claimedCount = 0;
-
-        for (const lw of localWorkspaces) {
-            const token = lw.token;
-            if (!token) continue;
-            const creatorToken = typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${token}`) : null;
-            if (!creatorToken) continue;
-
-            try {
-                const res = await api.claimWorkspace(token, creatorToken);
-                if (res?.data?.claimed) {
-                    claimedCount++;
-                }
-            } catch {
-                // Ignore conflict (already owned by another user) or 403 (invalid token) silently
-            }
+        // Reset memory set if user account switched
+        if (currentUserId !== LandingView.lastReconciledUserId) {
+            LandingView.reconciledTokens.clear();
+            LandingView.lastReconciledUserId = currentUserId;
         }
 
-        return claimedCount;
+        if (LandingView.inFlightReconcile) {
+            return LandingView.inFlightReconcile;
+        }
+
+        LandingView.inFlightReconcile = (async () => {
+            const localWorkspaces = LandingView.getRecentWorkspaces();
+            let claimedCount = 0;
+
+            for (const lw of localWorkspaces) {
+                const token = lw.token;
+                if (!token || LandingView.reconciledTokens.has(token)) continue;
+                const creatorToken = typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${token}`) : null;
+                if (!creatorToken) continue;
+
+                try {
+                    const res = await api.claimWorkspace(token, creatorToken);
+                    if (res?.data?.claimed) {
+                        claimedCount++;
+                        LandingView.reconciledTokens.add(token);
+                    }
+                } catch (err) {
+                    // If 409 conflict (already owned by another user) or 403 (invalid token), mark reconciled in this session
+                    if (err?.status === 409 || err?.status === 403) {
+                        LandingView.reconciledTokens.add(token);
+                    }
+                    // Network errors remain retryable on future invocations
+                }
+            }
+
+            return claimedCount;
+        })().finally(() => {
+            LandingView.inFlightReconcile = null;
+        });
+
+        return LandingView.inFlightReconcile;
     }
 
     /**
      * Fetch cloud workspaces (if authenticated) and merge with local workspaces.
-     * @returns {Promise<Array<{token: string, name: string, currency: string, lastAccessed: number, isCloud: boolean, isOwner: boolean, memberName: string|null, netBalanceCents: number|null}>>}
+     * @returns {Promise<Array<{token: string, name: string, currency: string, lastAccessed: number, isCloud: boolean, isOwner: boolean, memberId: number|null, memberName: string|null, netBalanceCents: number|null}>>}
      */
     static async fetchAndMergeWorkspaces() {
         const isAuthenticated = Boolean(store.getState()?.isAuthenticated);
@@ -221,6 +247,8 @@ export class LandingView {
                     lastAccessed: cw.lastAccessed || (cw.created_at ? new Date(cw.created_at).getTime() : Date.now()),
                     isCloud: true,
                     isOwner: Boolean(cw.is_owner || (currentUser && cw.owner_user_id === currentUser.id)),
+                    memberId: cw.member_id ? Number(cw.member_id) : null,
+                    user_member_id: cw.member_id ? Number(cw.member_id) : null,
                     memberName: cw.member_name || null,
                     netBalanceCents: cw.net_balance_cents !== undefined ? cw.net_balance_cents : null,
                     status: cw.status,
@@ -240,6 +268,8 @@ export class LandingView {
                     isCloud: false,
                     isOwner: isCreator,
                     isCreator: isCreator,
+                    memberId: null,
+                    user_member_id: null,
                     memberName: lw.memberName || null,
                     netBalanceCents: null,
                     status: null,
@@ -251,12 +281,211 @@ export class LandingView {
     }
 
     /**
+     * Render HTML markup for individual workspace items in the Workspaces Hub.
+     * @param {Array<Object>} workspaces
+     * @param {boolean} isAuthenticated
+     * @returns {string}
+     */
+    static renderWorkspaceItemsHtml(workspaces = [], isAuthenticated = false) {
+        if (!workspaces || workspaces.length === 0) {
+            return `
+                <div class="empty-state" id="hub-empty-state" style="padding: var(--space-6) var(--space-4); text-align: center;">
+                    <div class="empty-state-title">No recent workspaces</div>
+                    <div class="empty-state-text">Workspaces you create or visit on this browser will appear here.</div>
+                </div>
+            `;
+        }
+
+        return `
+            <div style="display: flex; flex-direction: column; gap: var(--space-2); max-height: 280px; overflow-y: auto;">
+                ${workspaces.map(w => `
+                    <div class="workspace-item" style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-2) var(--space-3); background: var(--surface-secondary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); gap: var(--space-2);">
+                        <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+                            <div style="display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;">
+                                <span style="font-weight: 600; font-size: var(--font-size-sm); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(w.name)}</span>
+                                <span class="badge badge-settled badge-mono" style="font-size: var(--font-size-2xs);">${escapeHtml(w.currency || 'INR')}</span>
+                                ${w.isOwner ? `<span class="badge badge-mono badge-owner" style="font-size: var(--font-size-2xs); background: rgba(234, 179, 8, 0.12); color: #92400e; border: 1px solid rgba(234, 179, 8, 0.28); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('crown', { size: 10 })} ${w.isCloud ? 'Owner' : 'Organizer'}<!-- 👑 Owner --></span>` : ''}
+                                ${w.memberName ? `<span class="badge badge-mono badge-member" style="font-size: var(--font-size-2xs); background: var(--brand-primary-soft, #E8F0EC); color: var(--brand-primary, #18352B); border: 1px solid var(--brand-accent-border, #C9D0CB); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('user', { size: 10 })} ${escapeHtml(w.memberName)}</span>` : ''}
+                                ${w.isCloud ? `<span class="badge badge-mono badge-cloud" style="font-size: var(--font-size-2xs); background: var(--financial-credit-bg, #E8F5F1); color: var(--financial-credit-text, #065A43); border: 1px solid var(--financial-credit-border, #B6E2D5); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('cloud', { size: 10 })} Cloud Synced</span>` : (isAuthenticated ? `<span class="badge badge-mono badge-local" style="font-size: var(--font-size-2xs); background: var(--surface-secondary, #f1f5f9); color: var(--text-muted, #64748b); border: 1px solid var(--border-subtle, #cbd5e1); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('folder', { size: 10 })} Local to this browser</span>` : '')}
+                            </div>
+                            <span style="font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-mono);">
+                                Last accessed: ${new Date(w.lastAccessed || Date.now()).toLocaleDateString()}
+                            </span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0;">
+                            ${!w.isCloud && isAuthenticated && (typeof localStorage !== 'undefined' && localStorage.getItem(`smartsplit_creator_${w.token}`)) ? `
+                                <button type="button" class="btn btn-primary btn-xs btn-claim-local-workspace" data-token="${escapeHtml(w.token)}" style="font-size: var(--font-size-2xs); padding: 3px 8px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                                    ${renderIcon('cloud', { size: 10 })}
+                                    <span>Sync to Account</span>
+                                </button>
+                            ` : ''}
+                            <span class="workspace-balance-badge badge badge-settled badge-mono" data-token="${escapeHtml(w.token)}" style="font-size: var(--font-size-xs); font-family: var(--font-mono); min-width: 50px; text-align: center;">
+                                —
+                            </span>
+                            <button type="button" class="btn btn-secondary btn-sm btn-open-workspace" data-token="${escapeHtml(w.token)}">
+                                Open &rarr;
+                            </button>
+                            <button type="button" class="btn btn-ghost btn-sm btn-delete-workspace" data-token="${escapeHtml(w.token)}" data-name="${escapeHtml(w.name)}" data-is-owner="${w.isOwner ? 'true' : 'false'}" title="${w.isOwner || !w.isCloud ? 'Manage / Delete Workspace' : 'Remove from Workspaces'}" style="color: var(--text-muted); padding: 4px 6px;">
+                                ${renderIcon('trash2', { size: 13 })}
+                            </button>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Attach event listeners to workspace list items (claim, open, delete).
+     * @param {HTMLElement} modalEl
+     */
+    static attachWorkspaceItemListeners(modalEl) {
+        if (!modalEl) return;
+
+        // Manual Sync to Account button listener in hub modal
+        modalEl.querySelectorAll('.btn-claim-local-workspace').forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = 'true';
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const token = btn.dataset.token;
+                if (!token) return;
+                const creatorToken = typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${token}`) : null;
+                btn.disabled = true;
+                btn.textContent = 'Syncing...';
+                try {
+                    await api.claimWorkspace(token, creatorToken);
+                    LandingView.reconciledTokens.add(token);
+                    Toast.success('Workspace linked to your account successfully.');
+                    Modal.close();
+                    LandingView.openWorkspacesModal();
+                } catch (err) {
+                    btn.disabled = false;
+                    btn.innerHTML = `${renderIcon('cloud', { size: 10 })} <span>Sync to Account</span>`;
+                    Toast.error(err.message || 'Failed to link workspace.');
+                }
+            });
+        });
+
+        // Navigation button listeners
+        modalEl.querySelectorAll('.btn-open-workspace').forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = 'true';
+            btn.addEventListener('click', () => {
+                const token = btn.dataset.token;
+                Modal.close();
+                router.navigate(`/g/${token}`);
+            });
+        });
+
+        // Delete workspace button listeners
+        modalEl.querySelectorAll('.btn-delete-workspace').forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.dataset.bound = 'true';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const token = btn.dataset.token;
+                const name = btn.dataset.name || 'Workspace';
+
+                Modal.open({
+                    title: `Workspace Options — ${escapeHtml(name)}`,
+                    size: 'sm',
+                    content: `
+                        <div style="font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--space-3);">
+                            Choose how you would like to manage <strong>${escapeHtml(name)}</strong>:
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+                            <!-- Option 1: Local Unlink / Safe Remove -->
+                            <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: var(--space-3); background: var(--surface-secondary);">
+                                <div style="font-weight: 600; font-size: var(--font-size-sm); color: var(--text-primary); margin-bottom: 2px;">
+                                    Remove from My Workspaces
+                                </div>
+                                <div style="font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--space-2); line-height: 1.4;">
+                                    Unlinks this workspace from your local list on this browser. All shared transactions remain live for other members.
+                                </div>
+                                <button type="button" class="btn btn-secondary btn-sm btn-block" id="btn-action-unlink-workspace">
+                                    Remove from My List
+                                </button>
+                            </div>
+
+                            <!-- Option 2: Global Database Wipe -->
+                            <div style="border: 1px solid rgba(239, 68, 68, 0.25); border-radius: var(--radius-sm); padding: var(--space-3); background: rgba(239, 68, 68, 0.04);">
+                                <div style="font-weight: 600; font-size: var(--font-size-sm); color: var(--financial-debt); margin-bottom: 2px; display: flex; align-items: center; gap: 4px;">
+                                    ${renderIcon('trash2', { size: 12 })}
+                                    <span>Delete Workspace for Everyone</span>
+                                </div>
+                                <div style="font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--space-2); line-height: 1.4;">
+                                    Permanently deletes this workspace, allocations, receipts, and settlement history for all participants. <strong>Cannot be undone.</strong>
+                                </div>
+                                <button type="button" class="btn btn-danger btn-sm btn-block" id="btn-action-delete-workspace">
+                                    Delete for Everyone
+                                </button>
+                            </div>
+                        </div>
+                    `,
+                    showFooter: false,
+                    onMount: (subModalEl) => {
+                        const unlinkBtn = subModalEl.querySelector('#btn-action-unlink-workspace');
+                        if (unlinkBtn) {
+                            unlinkBtn.addEventListener('click', () => {
+                                LandingView.removeRecentWorkspace(token);
+                                Toast.success(`Workspace "${name}" removed from your list.`);
+                                Modal.close();
+                                if (typeof window !== 'undefined' && window.location.hash.includes(token)) {
+                                    router.navigate('/');
+                                } else {
+                                    LandingView.openWorkspacesModal();
+                                }
+                            });
+                        }
+
+                        const deleteBtn = subModalEl.querySelector('#btn-action-delete-workspace');
+                        if (deleteBtn) {
+                            deleteBtn.addEventListener('click', async () => {
+                                deleteBtn.disabled = true;
+                                deleteBtn.textContent = 'Deleting...';
+                                try {
+                                    await api.deleteGroup(token);
+                                    LandingView.removeRecentWorkspace(token);
+                                    Toast.success(`Workspace "${name}" was deleted permanently.`);
+                                    Modal.close();
+                                    if (typeof window !== 'undefined' && window.location.hash.includes(token)) {
+                                        router.navigate('/');
+                                    } else {
+                                        LandingView.openWorkspacesModal();
+                                    }
+                                } catch (err) {
+                                    const isNotFound = err.status === 404 || (err.message && (err.message.includes('not found') || err.message.includes('NOT_FOUND')));
+                                    if (isNotFound) {
+                                        LandingView.removeRecentWorkspace(token);
+                                        Toast.success(`Workspace "${name}" was removed from your list.`);
+                                        Modal.close();
+                                        if (typeof window !== 'undefined' && window.location.hash.includes(token)) {
+                                            router.navigate('/');
+                                        } else {
+                                            LandingView.openWorkspacesModal();
+                                        }
+                                    } else {
+                                        deleteBtn.disabled = false;
+                                        deleteBtn.textContent = 'Delete for Everyone';
+                                        Toast.error(err.message || 'Failed to delete workspace.');
+                                    }
+                                }
+                            });
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    /**
      * Open the Workspaces Hub modal showing recently visited & cloud groups with quick switcher and consolidated net financial summary.
      */
-    static async openWorkspacesModal() {
+    static openWorkspacesModal() {
         const isAuthenticated = Boolean(store.getState()?.isAuthenticated);
-        const recentWorkspaces = await LandingView.fetchAndMergeWorkspaces();
-        const baseCurrency = recentWorkspaces[0]?.currency || 'INR';
+        const initialWorkspaces = LandingView.getRecentWorkspaces();
+        const baseCurrency = initialWorkspaces[0]?.currency || 'INR';
 
         const content = `
             <div style="margin-bottom: var(--space-3);">
@@ -276,67 +505,28 @@ export class LandingView {
                     Switch between active expense workspaces or initialize a new group ledger.
                 </p>
 
-                ${recentWorkspaces.length === 0 ? `
-                    <div class="empty-state" style="padding: var(--space-6) var(--space-4); text-align: center;">
-                        <div class="empty-state-title">No recent workspaces</div>
-                        <div class="empty-state-text">Workspaces you create or visit on this browser will appear here.</div>
-                    </div>
-                ` : `
-                    <!-- Consolidated Multi-Workspace KPI Summary Bar -->
-                    <div id="workspaces-summary-kpi" style="background: var(--surface-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: var(--space-3); margin-bottom: var(--space-3);">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-2); flex-wrap: wrap;">
-                            <div>
-                                <div style="font-size: var(--font-size-2xs); text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 2px;">
-                                    Total Net Position Across All Workspaces
-                                </div>
-                                <div id="kpi-total-net" class="tnum" style="font-size: var(--font-size-lg); font-weight: 700; font-family: var(--font-mono); color: var(--text-primary);">
-                                    Loading…
-                                </div>
+                <!-- Consolidated Multi-Workspace KPI Summary Bar -->
+                <div id="workspaces-summary-kpi" style="background: var(--surface-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: var(--space-3); margin-bottom: var(--space-3);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-2); flex-wrap: wrap;">
+                        <div>
+                            <div style="font-size: var(--font-size-2xs); text-transform: uppercase; font-weight: 700; color: var(--text-muted); letter-spacing: 0.05em; margin-bottom: 2px;">
+                                Total Net Position Across All Workspaces
                             </div>
-                            <div id="kpi-status-counts" style="display: flex; gap: var(--space-2); align-items: center; font-size: var(--font-size-xs); flex-wrap: wrap;">
-                                <span class="badge badge-settled badge-mono" id="kpi-credit-count">Active Credit: …</span>
-                                <span class="badge badge-settled badge-mono" id="kpi-debt-count">Active Debt: …</span>
+                            <div id="kpi-total-net" class="tnum" style="font-size: var(--font-size-lg); font-weight: 700; font-family: var(--font-mono); color: var(--text-muted); min-height: 24px;">
+                                —
                             </div>
                         </div>
+                        <div id="kpi-status-counts" style="display: flex; gap: var(--space-2); align-items: center; font-size: var(--font-size-xs); flex-wrap: wrap;">
+                            <span class="badge badge-settled badge-mono" id="kpi-credit-count">Active Credit: —</span>
+                            <span class="badge badge-settled badge-mono" id="kpi-debt-count">Active Debt: —</span>
+                        </div>
                     </div>
+                </div>
 
-                    <!-- Individual Workspaces List -->
-                    <div style="display: flex; flex-direction: column; gap: var(--space-2); max-height: 280px; overflow-y: auto;">
-                        ${recentWorkspaces.map(w => `
-                            <div class="workspace-item" style="display: flex; justify-content: space-between; align-items: center; padding: var(--space-2) var(--space-3); background: var(--surface-secondary); border-radius: var(--radius-xs); border: 1px solid var(--border-subtle); gap: var(--space-2);">
-                                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
-                                    <div style="display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;">
-                                        <span style="font-weight: 600; font-size: var(--font-size-sm); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(w.name)}</span>
-                                        <span class="badge badge-settled badge-mono" style="font-size: var(--font-size-2xs);">${escapeHtml(w.currency || 'INR')}</span>
-                                        ${w.isOwner ? `<span class="badge badge-mono badge-owner" style="font-size: var(--font-size-2xs); background: rgba(234, 179, 8, 0.12); color: #92400e; border: 1px solid rgba(234, 179, 8, 0.28); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('crown', { size: 10 })} ${w.isCloud ? 'Owner' : 'Organizer'}<!-- 👑 Owner --></span>` : ''}
-                                        ${w.memberName ? `<span class="badge badge-mono badge-member" style="font-size: var(--font-size-2xs); background: var(--brand-primary-soft, #E8F0EC); color: var(--brand-primary, #18352B); border: 1px solid var(--brand-accent-border, #C9D0CB); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('user', { size: 10 })} ${escapeHtml(w.memberName)}</span>` : ''}
-                                        ${w.isCloud ? `<span class="badge badge-mono badge-cloud" style="font-size: var(--font-size-2xs); background: var(--financial-credit-bg, #E8F5F1); color: var(--financial-credit-text, #065A43); border: 1px solid var(--financial-credit-border, #B6E2D5); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('cloud', { size: 10 })} Cloud Synced</span>` : (isAuthenticated ? `<span class="badge badge-mono badge-local" style="font-size: var(--font-size-2xs); background: var(--surface-secondary, #f1f5f9); color: var(--text-muted, #64748b); border: 1px solid var(--border-subtle, #cbd5e1); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('folder', { size: 10 })} Local to this browser</span>` : '')}
-                                    </div>
-                                    <span style="font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-mono);">
-                                        Last accessed: ${new Date(w.lastAccessed || Date.now()).toLocaleDateString()}
-                                    </span>
-                                </div>
-                                <div style="display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0;">
-                                    ${!w.isCloud && isAuthenticated && (typeof localStorage !== 'undefined' && localStorage.getItem(`smartsplit_creator_${w.token}`)) ? `
-                                        <button type="button" class="btn btn-primary btn-xs btn-claim-local-workspace" data-token="${escapeHtml(w.token)}" style="font-size: var(--font-size-2xs); padding: 3px 8px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
-                                            ${renderIcon('cloud', { size: 10 })}
-                                            <span>Sync to Account</span>
-                                        </button>
-                                    ` : ''}
-                                    <span class="workspace-balance-badge badge badge-settled badge-mono" data-token="${escapeHtml(w.token)}" style="font-size: var(--font-size-xs); font-family: var(--font-mono);">
-                                        Loading…
-                                    </span>
-                                    <button type="button" class="btn btn-secondary btn-sm btn-open-workspace" data-token="${escapeHtml(w.token)}">
-                                        Open &rarr;
-                                    </button>
-                                    <button type="button" class="btn btn-ghost btn-sm btn-delete-workspace" data-token="${escapeHtml(w.token)}" data-name="${escapeHtml(w.name)}" data-is-owner="${w.isOwner ? 'true' : 'false'}" title="${w.isOwner || !w.isCloud ? 'Manage / Delete Workspace' : 'Remove from Workspaces'}" style="color: var(--text-muted); padding: 4px 6px;">
-                                        ${renderIcon('trash2', { size: 13 })}
-                                    </button>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `}
+                <!-- Workspaces List Mount Container -->
+                <div id="hub-workspaces-list-container">
+                    ${LandingView.renderWorkspaceItemsHtml(initialWorkspaces, isAuthenticated)}
+                </div>
 
                 <div style="margin-top: var(--space-4); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2);">
                     <div style="display: flex; gap: var(--space-2); align-items: center;">
@@ -349,7 +539,7 @@ export class LandingView {
                             <span>Pair Device with Code</span>
                         </button>
                     </div>
-                    ${recentWorkspaces.length > 0 ? `
+                    ${initialWorkspaces.length > 0 ? `
                         <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-workspaces-history" style="color: var(--text-muted);">
                             Clear History
                         </button>
@@ -363,134 +553,8 @@ export class LandingView {
             content,
             showFooter: false,
             onMount: (modalEl) => {
-                // Manual Sync to Account button listener in hub modal
-                modalEl.querySelectorAll('.btn-claim-local-workspace').forEach(btn => {
-                    btn.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        const token = btn.dataset.token;
-                        if (!token) return;
-                        const creatorToken = typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${token}`) : null;
-                        btn.disabled = true;
-                        btn.textContent = 'Syncing...';
-                        try {
-                            await api.claimWorkspace(token, creatorToken);
-                            Toast.success('Workspace linked to your account successfully.');
-                            Modal.close();
-                            await LandingView.openWorkspacesModal();
-                        } catch (err) {
-                            btn.disabled = false;
-                            btn.innerHTML = `${renderIcon('cloud', { size: 10 })} <span>Sync to Account</span>`;
-                            Toast.error(err.message || 'Failed to link workspace.');
-                        }
-                    });
-                });
-
-                // Navigation button listeners
-                modalEl.querySelectorAll('.btn-open-workspace').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        const token = btn.dataset.token;
-                        Modal.close();
-                        router.navigate(`/g/${token}`);
-                    });
-                });
-
-                // Delete workspace button listeners
-                modalEl.querySelectorAll('.btn-delete-workspace').forEach(btn => {
-                    btn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        const token = btn.dataset.token;
-                        const name = btn.dataset.name || 'Workspace';
-
-                        Modal.open({
-                            title: `Workspace Options — ${escapeHtml(name)}`,
-                            size: 'sm',
-                            content: `
-                                <div style="font-size: var(--font-size-sm); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--space-3);">
-                                    Choose how you would like to manage <strong>${escapeHtml(name)}</strong>:
-                                </div>
-                                <div style="display: flex; flex-direction: column; gap: var(--space-3);">
-                                    <!-- Option 1: Local Unlink / Safe Remove -->
-                                    <div style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: var(--space-3); background: var(--surface-secondary);">
-                                        <div style="font-weight: 600; font-size: var(--font-size-sm); color: var(--text-primary); margin-bottom: 2px;">
-                                            Remove from My Workspaces
-                                        </div>
-                                        <div style="font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--space-2); line-height: 1.4;">
-                                            Unlinks this workspace from your local list on this browser. All shared transactions remain live for other members.
-                                        </div>
-                                        <button type="button" class="btn btn-secondary btn-sm btn-block" id="btn-action-unlink-workspace">
-                                            Remove from My List
-                                        </button>
-                                    </div>
-
-                                    <!-- Option 2: Global Database Wipe -->
-                                    <div style="border: 1px solid rgba(239, 68, 68, 0.25); border-radius: var(--radius-sm); padding: var(--space-3); background: rgba(239, 68, 68, 0.04);">
-                                        <div style="font-weight: 600; font-size: var(--font-size-sm); color: var(--financial-debt); margin-bottom: 2px; display: flex; align-items: center; gap: 4px;">
-                                            ${renderIcon('trash2', { size: 12 })}
-                                            <span>Delete Workspace for Everyone</span>
-                                        </div>
-                                        <div style="font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--space-2); line-height: 1.4;">
-                                            Permanently deletes this workspace, allocations, receipts, and settlement history for all participants. <strong>Cannot be undone.</strong>
-                                        </div>
-                                        <button type="button" class="btn btn-danger btn-sm btn-block" id="btn-action-delete-workspace">
-                                            Delete for Everyone
-                                        </button>
-                                    </div>
-                                </div>
-                            `,
-                            showFooter: false,
-                            onMount: (subModalEl) => {
-                                const unlinkBtn = subModalEl.querySelector('#btn-action-unlink-workspace');
-                                if (unlinkBtn) {
-                                    unlinkBtn.addEventListener('click', async () => {
-                                        LandingView.removeRecentWorkspace(token);
-                                        Toast.success(`Workspace "${name}" removed from your list.`);
-                                        Modal.close();
-                                        if (typeof window !== 'undefined' && window.location.hash.includes(token)) {
-                                            router.navigate('/');
-                                        } else {
-                                            await LandingView.openWorkspacesModal();
-                                        }
-                                    });
-                                }
-
-                                const deleteBtn = subModalEl.querySelector('#btn-action-delete-workspace');
-                                if (deleteBtn) {
-                                    deleteBtn.addEventListener('click', async () => {
-                                        deleteBtn.disabled = true;
-                                        deleteBtn.textContent = 'Deleting...';
-                                        try {
-                                            await api.deleteGroup(token);
-                                            LandingView.removeRecentWorkspace(token);
-                                            Toast.success(`Workspace "${name}" was deleted permanently.`);
-                                            Modal.close();
-                                            if (typeof window !== 'undefined' && window.location.hash.includes(token)) {
-                                                router.navigate('/');
-                                            } else {
-                                                await LandingView.openWorkspacesModal();
-                                            }
-                                        } catch (err) {
-                                            const isNotFound = err.status === 404 || (err.message && (err.message.includes('not found') || err.message.includes('NOT_FOUND')));
-                                            if (isNotFound) {
-                                                LandingView.removeRecentWorkspace(token);
-                                                Toast.success(`Workspace "${name}" was removed from your list.`);
-                                                Modal.close();
-                                                if (typeof window !== 'undefined' && window.location.hash.includes(token)) {
-                                                    router.navigate('/');
-                                                } else {
-                                                    await LandingView.openWorkspacesModal();
-                                                }
-                                            } else {
-                                                deleteBtn.disabled = false;
-                                                deleteBtn.textContent = 'Delete for Everyone';
-                                                Toast.error(err.message || 'Failed to delete workspace.');
-                                            }
-                                        }
-                                    });
-                                }
-                            }
-                        });
-                    });
-                });
+                // Attach item action listeners immediately for fast interactivity
+                LandingView.attachWorkspaceItemListeners(modalEl);
 
                 const createBtn = modalEl.querySelector('#btn-modal-create-workspace');
                 if (createBtn) {
@@ -530,76 +594,139 @@ export class LandingView {
                     });
                 }
 
-                // Asynchronous parallel fetch of balances across all workspace tokens
-                if (recentWorkspaces.length > 0) {
-                    const fetchPromises = recentWorkspaces.map(w =>
-                        api.getBalances(w.token)
-                            .then(res => ({ workspace: w, status: 'fulfilled', data: res?.data || res }))
-                            .catch(err => ({ workspace: w, status: 'rejected', error: err }))
-                    );
+                // Asynchronous non-blocking synchronization & balance hydration
+                LandingView.fetchAndMergeWorkspaces().then(async (mergedWorkspaces) => {
+                    const overlay = document.getElementById('modal-overlay');
+                    if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected) {
+                        return;
+                    }
 
-                    Promise.allSettled(fetchPromises).then((settledResults) => {
-                        const results = settledResults.map(r => r.value || { workspace: {}, status: 'rejected' });
-                        const summary = LandingView.calculateConsolidatedSummary(results);
+                    const targetCurrency = mergedWorkspaces[0]?.currency || baseCurrency;
 
+                    // Update workspaces list markup if merged list differs from initial
+                    const listContainer = modalEl.querySelector('#hub-workspaces-list-container');
+                    if (listContainer) {
+                        listContainer.innerHTML = LandingView.renderWorkspaceItemsHtml(mergedWorkspaces, isAuthenticated);
+                        LandingView.attachWorkspaceItemListeners(modalEl);
+                    }
+
+                    if (!mergedWorkspaces || mergedWorkspaces.length === 0) {
                         const kpiTotalEl = modalEl.querySelector('#kpi-total-net');
-                        const kpiCreditEl = modalEl.querySelector('#kpi-credit-count');
-                        const kpiDebtEl = modalEl.querySelector('#kpi-debt-count');
-
-                        // Update individual workspace badges
-                        summary.workspaceSummaries.forEach(ws => {
-                            const badgeEl = modalEl.querySelector(`.workspace-balance-badge[data-token="${ws.token}"]`);
-                            if (badgeEl) {
-                                if (ws.badgeType === 'credit') {
-                                    badgeEl.className = 'workspace-balance-badge badge badge-credit badge-mono';
-                                    badgeEl.textContent = ws.badgeText;
-                                    badgeEl.style.opacity = '1';
-                                } else if (ws.badgeType === 'debt') {
-                                    badgeEl.className = 'workspace-balance-badge badge badge-debt badge-mono';
-                                    badgeEl.textContent = ws.badgeText;
-                                    badgeEl.style.opacity = '1';
-                                } else if (ws.badgeType === 'settled') {
-                                    badgeEl.className = 'workspace-balance-badge badge badge-settled badge-mono';
-                                    badgeEl.textContent = ws.badgeText;
-                                    badgeEl.style.opacity = '1';
-                                } else {
-                                    badgeEl.className = 'workspace-balance-badge badge badge-settled badge-mono';
-                                    badgeEl.textContent = 'Unavailable';
-                                    badgeEl.style.opacity = '0.6';
-                                }
-                            }
-                        });
-
-                        // Update Consolidated KPI Bar
                         if (kpiTotalEl) {
-                            if (summary.successfulCount > 0) {
-                                if (summary.totalNetCents > 0) {
-                                    kpiTotalEl.style.color = 'var(--financial-credit)';
-                                    kpiTotalEl.textContent = `+${formatCurrency(summary.totalNetCents, baseCurrency)}`;
-                                } else if (summary.totalNetCents < 0) {
-                                    kpiTotalEl.style.color = 'var(--financial-debt)';
-                                    kpiTotalEl.textContent = `-${formatCurrency(Math.abs(summary.totalNetCents), baseCurrency)}`;
-                                } else {
-                                    kpiTotalEl.style.color = 'var(--text-primary)';
-                                    kpiTotalEl.textContent = formatCurrency(0, baseCurrency);
+                            kpiTotalEl.style.color = 'var(--text-primary)';
+                            kpiTotalEl.textContent = formatCurrency(0, targetCurrency);
+                        }
+                        const kpiCreditEl = modalEl.querySelector('#kpi-credit-count');
+                        if (kpiCreditEl) kpiCreditEl.textContent = 'Active Credit: 0';
+                        const kpiDebtEl = modalEl.querySelector('#kpi-debt-count');
+                        if (kpiDebtEl) kpiDebtEl.textContent = 'Active Debt: 0';
+                        return;
+                    }
+
+                    // Balance resolution:
+                    // For cloud workspaces returned by GET /api/user/workspaces, use authoritative net_balance_cents directly.
+                    // For local/guest workspaces, dispatch individual GET /api/groups/{token}/balances.
+                    const balancePromises = mergedWorkspaces.map(w => {
+                        if (w.isCloud && w.netBalanceCents !== null && w.netBalanceCents !== undefined) {
+                            return Promise.resolve({
+                                workspace: w,
+                                status: 'fulfilled',
+                                data: {
+                                    group: { currency_code: w.currency },
+                                    members: [
+                                        {
+                                            member_id: w.memberId,
+                                            name: w.memberName,
+                                            net_balance_cents: w.netBalanceCents,
+                                            status: w.status,
+                                        }
+                                    ]
                                 }
-                            } else {
-                                kpiTotalEl.style.color = 'var(--text-muted)';
-                                kpiTotalEl.textContent = 'Unavailable';
-                            }
-                        }
-
-                        if (kpiCreditEl) {
-                            kpiCreditEl.className = summary.activeCreditCount > 0 ? 'badge badge-credit badge-mono' : 'badge badge-settled badge-mono';
-                            kpiCreditEl.textContent = `Active Credit: ${summary.activeCreditCount} ${summary.activeCreditCount === 1 ? 'workspace' : 'workspaces'}`;
-                        }
-
-                        if (kpiDebtEl) {
-                            kpiDebtEl.className = summary.activeDebtCount > 0 ? 'badge badge-debt badge-mono' : 'badge badge-settled badge-mono';
-                            kpiDebtEl.textContent = `Active Debt: ${summary.activeDebtCount} ${summary.activeDebtCount === 1 ? 'workspace' : 'workspaces'}`;
+                            });
+                        } else {
+                            return api.getBalances(w.token)
+                                .then(res => ({ workspace: w, status: 'fulfilled', data: res?.data || res }))
+                                .catch(err => ({ workspace: w, status: 'rejected', error: err }));
                         }
                     });
-                }
+
+                    const settledResults = await Promise.allSettled(balancePromises);
+
+                    // Check again that the modal is still open before touching DOM
+                    if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected) {
+                        return;
+                    }
+
+                    const results = settledResults.map(r => r.value || { workspace: {}, status: 'rejected' });
+                    const summary = LandingView.calculateConsolidatedSummary(results);
+
+                    const kpiTotalEl = modalEl.querySelector('#kpi-total-net');
+                    const kpiCreditEl = modalEl.querySelector('#kpi-credit-count');
+                    const kpiDebtEl = modalEl.querySelector('#kpi-debt-count');
+
+                    // Update individual workspace badges
+                    summary.workspaceSummaries.forEach(ws => {
+                        const badgeEl = modalEl.querySelector(`.workspace-balance-badge[data-token="${ws.token}"]`);
+                        if (badgeEl) {
+                            if (ws.badgeType === 'credit') {
+                                badgeEl.className = 'workspace-balance-badge badge badge-credit badge-mono';
+                                badgeEl.textContent = ws.badgeText;
+                                badgeEl.style.opacity = '1';
+                            } else if (ws.badgeType === 'debt') {
+                                badgeEl.className = 'workspace-balance-badge badge badge-debt badge-mono';
+                                badgeEl.textContent = ws.badgeText;
+                                badgeEl.style.opacity = '1';
+                            } else if (ws.badgeType === 'settled') {
+                                badgeEl.className = 'workspace-balance-badge badge badge-settled badge-mono';
+                                badgeEl.textContent = ws.badgeText;
+                                badgeEl.style.opacity = '1';
+                            } else {
+                                badgeEl.className = 'workspace-balance-badge badge badge-settled badge-mono';
+                                badgeEl.textContent = 'Unavailable';
+                                badgeEl.style.opacity = '0.6';
+                            }
+                        }
+                    });
+
+                    // Update Consolidated KPI Bar
+                    if (kpiTotalEl) {
+                        if (summary.successfulCount === mergedWorkspaces.length && summary.successfulCount > 0) {
+                            if (summary.totalNetCents > 0) {
+                                kpiTotalEl.style.color = 'var(--financial-credit)';
+                                kpiTotalEl.textContent = `+${formatCurrency(summary.totalNetCents, targetCurrency)}`;
+                            } else if (summary.totalNetCents < 0) {
+                                kpiTotalEl.style.color = 'var(--financial-debt)';
+                                kpiTotalEl.textContent = `-${formatCurrency(Math.abs(summary.totalNetCents), targetCurrency)}`;
+                            } else {
+                                kpiTotalEl.style.color = 'var(--text-primary)';
+                                kpiTotalEl.textContent = formatCurrency(0, targetCurrency);
+                            }
+                        } else if (summary.successfulCount > 0 && summary.successfulCount < mergedWorkspaces.length) {
+                            kpiTotalEl.style.color = 'var(--text-muted)';
+                            kpiTotalEl.textContent = 'Partial summary';
+                        } else {
+                            kpiTotalEl.style.color = 'var(--text-muted)';
+                            kpiTotalEl.textContent = 'Unavailable';
+                        }
+                    }
+
+                    if (kpiCreditEl) {
+                        kpiCreditEl.className = summary.activeCreditCount > 0 ? 'badge badge-credit badge-mono' : 'badge badge-settled badge-mono';
+                        kpiCreditEl.textContent = `Active Credit: ${summary.activeCreditCount} ${summary.activeCreditCount === 1 ? 'workspace' : 'workspaces'}`;
+                    }
+
+                    if (kpiDebtEl) {
+                        kpiDebtEl.className = summary.activeDebtCount > 0 ? 'badge badge-debt badge-mono' : 'badge badge-settled badge-mono';
+                        kpiDebtEl.textContent = `Active Debt: ${summary.activeDebtCount} ${summary.activeDebtCount === 1 ? 'workspace' : 'workspaces'}`;
+                    }
+                }).catch(() => {
+                    const overlay = document.getElementById('modal-overlay');
+                    if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected) return;
+                    const kpiTotalEl = modalEl.querySelector('#kpi-total-net');
+                    if (kpiTotalEl && kpiTotalEl.textContent === '—') {
+                        kpiTotalEl.textContent = 'Unavailable';
+                    }
+                });
             }
         });
     }
