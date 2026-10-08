@@ -376,7 +376,7 @@ if (preg_match('/\.(png|jpg|jpeg|webp|pdf|svg|css|js|map|ico|txt|json)$/i', $req
             }
         }, 5000);
     </script>
-    <script type="module" src="/assets/js/app.js?v=2.0.2"></script>
-    <script src="/assets/js/pwa-init.js?v=2.0.2"></script>
+    <script type="module" src="/assets/js/app.js?v=2.0.3"></script>
+    <script src="/assets/js/pwa-init.js?v=2.0.3"></script>
 </body>
 </html>
