@@ -129,74 +129,13 @@ class GroupController extends BaseController
             return;
         }
 
-        $group = $this->groupRepo->findByInviteToken((string) $token);
-        if (!$group) {
+        $workspaceData = $this->groupRepo->getWorkspaceData((string) $token);
+        if (!$workspaceData) {
             $this->error("Group not found.", 'NOT_FOUND', null, 404);
             return;
         }
 
-        $groupId = (int) $group['id'];
-        $currencyCode = (string) ($group['currency_code'] ?? 'INR');
-
-        // 1. Members
-        $members = $this->memberRepo->findByGroupId($groupId);
-        $creatorMember = $this->memberRepo->getCreatorMember($groupId);
-        $creatorMemberId = $creatorMember ? (int) $creatorMember['id'] : (!empty($members) ? (int) $members[0]['id'] : null);
-
-        // 2. Balances & Debt Simplification Plan
-        $balanceService = new \App\Services\BalanceService();
-        $balanceReport = $balanceService->calculateGroupBalances($groupId);
-        $settlementPlan = \App\Services\SettlementEngine::simplifyDebts(
-            $balanceReport['members'],
-            $currencyCode
-        );
-
-        // 3. Expenses
-        $expenseRepo = new \App\Repositories\ExpenseRepository();
-        $expenses = $expenseRepo->findByGroupId($groupId, false, []);
-
-        // 4. Settlements
-        $settlementRepo = new \App\Repositories\SettlementRepository();
-        $settlements = $settlementRepo->findByGroupId($groupId);
-
-        $this->json([
-            'group' => [
-                'id' => $groupId,
-                'uuid' => $group['uuid'],
-                'name' => $group['name'],
-                'currency_code' => $currencyCode,
-                'invite_token' => $group['invite_token'],
-                'owner_user_id' => $group['owner_user_id'] ? (int) $group['owner_user_id'] : null,
-                'creator_member_id' => $creatorMemberId,
-                'version' => (int) $group['version'],
-                'created_at' => $group['created_at'],
-            ],
-            'members' => array_map(function (array $m) {
-                return [
-                    'id' => (int) $m['id'],
-                    'name' => $m['name'],
-                    'upi_id' => $m['upi_id'] ?? null,
-                    'color_hex' => $m['color_hex'] ?? null,
-                    'user_id' => $m['user_id'] ? (int) $m['user_id'] : null,
-                    'is_active' => (bool) $m['is_active'],
-                    'created_at' => $m['created_at'],
-                ];
-            }, $members),
-            'balances' => [
-                'total_spending_cents' => $balanceReport['total_spending_cents'],
-                'total_settled_cents' => $balanceReport['total_settled_cents'],
-                'zero_sum_verified' => $balanceReport['zero_sum_verified'],
-                'members' => $balanceReport['members'],
-            ],
-            'settlement_plan' => [
-                'total_spending_cents' => $balanceReport['total_spending_cents'],
-                'total_transactions' => $settlementPlan['total_transactions'],
-                'total_settlement_volume_cents' => $settlementPlan['total_settlement_volume_cents'],
-                'transactions' => $settlementPlan['transactions'],
-            ],
-            'expenses' => $expenses,
-            'settlements' => $settlements,
-        ]);
+        $this->json($workspaceData);
     }
 
     /**

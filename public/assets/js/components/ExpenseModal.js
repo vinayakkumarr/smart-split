@@ -14,6 +14,9 @@ import { renderIcon } from '../utils/icons.js';
 import { offlineManager } from '../utils/offline.js';
 
 export class ExpenseModal {
+    static _cachedCategories = null;
+    static _cachedTemplates = {};
+
     /**
      * Compute what-if projected balances for members given current balances and proposed transaction.
      * @param {Object} params
@@ -166,9 +169,8 @@ export class ExpenseModal {
             member_ids: it.member_ids && it.member_ids.length > 0 ? [...it.member_ids] : members.map(m => m.id)
         }));
 
-        // Fetch templates and categories for quick-load preset dropdown & taxonomy
-        let savedTemplates = [];
-        let categories = [
+        // Default system categories & cached templates for instantaneous synchronous render
+        const defaultCategories = [
             { id: 1, name: 'General', icon: '📦', is_system: true },
             { id: 2, name: 'Food & Dining', icon: '🍽️', is_system: true },
             { id: 3, name: 'Travel & Transport', icon: '✈️', is_system: true },
@@ -178,14 +180,8 @@ export class ExpenseModal {
             { id: 7, name: 'Entertainment', icon: '🎟️', is_system: true },
         ];
 
-        try {
-            const [tRes, cRes] = await Promise.all([
-                api.getTemplates(token).catch(() => null),
-                api.getCategories(token).catch(() => null),
-            ]);
-            if (tRes?.data?.templates) savedTemplates = tRes.data.templates;
-            if (cRes?.data?.categories && cRes.data.categories.length > 0) categories = cRes.data.categories;
-        } catch (_) {}
+        let categories = ExpenseModal._cachedCategories || defaultCategories;
+        let savedTemplates = ExpenseModal._cachedTemplates[token] || [];
 
         const content = document.createElement('div');
         content.innerHTML = `
@@ -372,8 +368,8 @@ export class ExpenseModal {
                 <!-- Additional expense options -->
                 <div id="more-options-section" class="progressive-disclosure-section" style="${isEditing || !!duplicateFrom || initialCategoryId !== 1 || initialNotes || isMultiPayer ? 'display: block;' : 'display: none;'} border-top: 1px dashed var(--border-subtle); padding-top: var(--space-3); margin-bottom: var(--space-3);">
                     <!-- Reusable Template Quick-Loader (If templates exist) -->
-                    ${!isEditing && !duplicateFrom && savedTemplates.length > 0 ? `
-                        <div id="template-bar" style="display: flex; align-items: center; justify-content: space-between; background: var(--surface-secondary); padding: 5px 8px; border-radius: var(--radius-sm); margin-bottom: var(--space-3); border: 1px solid var(--border-subtle); font-size: var(--font-size-xs);">
+                    ${!isEditing && !duplicateFrom ? `
+                        <div id="template-bar" style="display: ${savedTemplates.length > 0 ? 'flex' : 'none'}; align-items: center; justify-content: space-between; background: var(--surface-secondary); padding: 5px 8px; border-radius: var(--radius-sm); margin-bottom: var(--space-3); border: 1px solid var(--border-subtle); font-size: var(--font-size-xs);">
                             <span style="font-weight: 600; color: var(--text-secondary);">Preset Template:</span>
                             <select id="modal-template-select" class="form-select" style="font-size: var(--font-size-xs); padding: 2px 6px; width: auto; min-width: 170px;">
                                 <option value="">-- Custom Transaction --</option>
@@ -721,6 +717,41 @@ export class ExpenseModal {
                         recalculate();
                         Toast.show(`Loaded template: "${tpl.title}"`, 'info');
                     });
+                }
+
+                // Non-blocking asynchronous hydration for workspace custom categories and templates
+                if (!ExpenseModal._cachedCategories || !ExpenseModal._cachedTemplates[token]) {
+                    Promise.all([
+                        ExpenseModal._cachedTemplates[token]
+                            ? Promise.resolve(ExpenseModal._cachedTemplates[token])
+                            : api.getTemplates(token).then((r) => r?.data?.templates || []).catch(() => []),
+                        ExpenseModal._cachedCategories
+                            ? Promise.resolve(ExpenseModal._cachedCategories)
+                            : api.getCategories(token).then((r) => r?.data?.categories || []).catch(() => []),
+                    ]).then(([tpls, cats]) => {
+                        if (tpls && Array.isArray(tpls) && tpls.length > 0) {
+                            ExpenseModal._cachedTemplates[token] = tpls;
+                            savedTemplates = tpls;
+                            const tBar = overlay.querySelector('#template-bar');
+                            const tSel = overlay.querySelector('#modal-template-select');
+                            if (tSel) {
+                                tSel.innerHTML = `
+                                    <option value="">-- Custom Transaction --</option>
+                                    ${tpls.map((t) => `<option value="${t.id}">${Formatters.escapeHtml(t.title)} (${t.split_type})</option>`).join('')}
+                                `;
+                                if (tBar) tBar.style.display = 'flex';
+                            }
+                        }
+                        if (cats && Array.isArray(cats) && cats.length > 0) {
+                            ExpenseModal._cachedCategories = cats;
+                            if (categorySelect) {
+                                const currentCatVal = categorySelect.value;
+                                categorySelect.innerHTML = cats.map((c) => `
+                                    <option value="${c.id}" ${String(currentCatVal) === String(c.id) ? 'selected' : ''}>${Formatters.escapeHtml(c.name)}</option>
+                                `).join('');
+                            }
+                        }
+                    }).catch(() => {});
                 }
 
                 function renderItemizedRows() {
@@ -1689,6 +1720,9 @@ export class ExpenseModal {
                         color_hex: selectedColor,
                     });
                     const newCategory = res?.data?.category;
+                    if (newCategory && ExpenseModal._cachedCategories) {
+                        ExpenseModal._cachedCategories.push(newCategory);
+                    }
                     Toast.show(`Category "${name}" created!`, 'success');
                     if (typeof onCreated === 'function' && newCategory) {
                         onCreated(newCategory);

@@ -20,7 +20,7 @@ class RateLimiterService
     public function __construct(?PDO $pdo = null)
     {
         $this->pdo = $pdo ?? Database::getConnection();
-        $this->ensureTableExists();
+        // Schema is maintained by migration 007_add_rate_limiting.sql
     }
 
     /**

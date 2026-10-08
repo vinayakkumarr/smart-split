@@ -38,8 +38,8 @@ class BalanceService
      */
     public function calculateGroupBalances(int $groupId): array
     {
-        return Database::transaction(function (PDO $pdo) use ($groupId): array {
-            $members = $this->memberRepo->findByGroupId($groupId);
+        $pdo = $this->pdo;
+        $members = $this->memberRepo->findByGroupId($groupId);
             if (empty($members)) {
                 return [
                     'group_id' => $groupId,
@@ -174,7 +174,6 @@ class BalanceService
                 'zero_sum_verified' => true,
                 'members' => array_values($memberMap),
             ];
-        });
     }
 
     /**
