@@ -853,8 +853,15 @@ window.addEventListener('offline', () => {
 });
 
 // Initialize startup authentication handshake, navbar, and router
-initAuth().then(() => {
+initAuth().then(async (user) => {
     renderNavbarAuth(store.getState());
+    if (user) {
+        await LandingView.reconcileLocalWorkspaces();
+        const mainEl = document.getElementById('main-content');
+        if (mainEl && store.getState()?.activeView === 'landing') {
+            LandingView.syncAndRenderWorkspaces(mainEl);
+        }
+    }
 });
 router.start();
 renderNavbarAuth(store.getState());

@@ -160,6 +160,23 @@ class ApiClient {
     // --- Progressive Identity & Claiming API ---
 
     /**
+     * Link/claim a guest-created workspace to the authenticated user account.
+     * @param {string} token Workspace invite token
+     * @param {string|null} [creatorToken] Secret creator member token from localStorage
+     */
+    async claimWorkspace(token, creatorToken = null) {
+        const secToken = creatorToken || (typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${token}`) : null);
+        const headers = {};
+        if (secToken) {
+            headers['X-Creator-Token'] = secToken;
+        }
+        return this.request(`/groups/${encodeURIComponent(token)}/claim-workspace`, {
+            method: 'POST',
+            headers,
+        });
+    }
+
+    /**
      * Link an existing member slot in a workspace to the authenticated user.
      * @param {string} token
      * @param {number} memberId

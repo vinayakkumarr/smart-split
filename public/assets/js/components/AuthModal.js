@@ -47,6 +47,22 @@ export class AuthModal {
     }
 
     /**
+     * Trigger background reconciliation of local guest workspaces upon auth state change.
+     */
+    static triggerReconciliation() {
+        import('./LandingView.js').then(m => {
+            if (m && m.LandingView && typeof m.LandingView.reconcileLocalWorkspaces === 'function') {
+                m.LandingView.reconcileLocalWorkspaces().then(() => {
+                    const mainEl = document.getElementById('main-content');
+                    if (mainEl && store.getState()?.activeView === 'landing') {
+                        m.LandingView.syncAndRenderWorkspaces(mainEl);
+                    }
+                }).catch(() => {});
+            }
+        }).catch(() => {});
+    }
+
+    /**
      * Close the authentication modal.
      */
     static close() {
@@ -417,6 +433,7 @@ export class AuthModal {
                         authLoading: false,
                     });
 
+                    AuthModal.triggerReconciliation();
                     Toast.success(`Welcome back, ${user.display_name}!`);
                     AuthModal.close();
 
@@ -492,6 +509,7 @@ export class AuthModal {
                         authLoading: false,
                     });
 
+                    AuthModal.triggerReconciliation();
                     AuthModal.activeUser = user;
                     AuthModal.activeRecoveryCode = recoveryCode;
                     AuthModal.switchMode('recovery_key');
@@ -562,6 +580,7 @@ export class AuthModal {
                         authLoading: false,
                     });
 
+                    AuthModal.triggerReconciliation();
                     AuthModal.activeUser = user;
                     AuthModal.activeRecoveryCode = newRecoveryCode;
                     AuthModal.switchMode('recovery_key');

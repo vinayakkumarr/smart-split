@@ -157,6 +157,37 @@ export class LandingView {
     }
 
     /**
+     * Reconcile and claim local guest-created workspaces for the authenticated user.
+     * Iterates over local workspaces that have creator tokens and links them to the account.
+     * @returns {Promise<number>} Number of successfully claimed workspaces
+     */
+    static async reconcileLocalWorkspaces() {
+        const isAuthenticated = Boolean(store.getState()?.isAuthenticated);
+        if (!isAuthenticated) return 0;
+
+        const localWorkspaces = LandingView.getRecentWorkspaces();
+        let claimedCount = 0;
+
+        for (const lw of localWorkspaces) {
+            const token = lw.token;
+            if (!token) continue;
+            const creatorToken = typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${token}`) : null;
+            if (!creatorToken) continue;
+
+            try {
+                const res = await api.claimWorkspace(token, creatorToken);
+                if (res?.data?.claimed) {
+                    claimedCount++;
+                }
+            } catch {
+                // Ignore conflict (already owned by another user) or 403 (invalid token) silently
+            }
+        }
+
+        return claimedCount;
+    }
+
+    /**
      * Fetch cloud workspaces (if authenticated) and merge with local workspaces.
      * @returns {Promise<Array<{token: string, name: string, currency: string, lastAccessed: number, isCloud: boolean, isOwner: boolean, memberName: string|null, netBalanceCents: number|null}>>}
      */
@@ -168,6 +199,7 @@ export class LandingView {
 
         if (isAuthenticated) {
             try {
+                await LandingView.reconcileLocalWorkspaces();
                 const cloudRes = await api.getUserWorkspaces();
                 cloudWorkspaces = cloudRes?.data?.workspaces || [];
             } catch {
@@ -278,13 +310,19 @@ export class LandingView {
                                         <span class="badge badge-settled badge-mono" style="font-size: var(--font-size-2xs);">${escapeHtml(w.currency || 'INR')}</span>
                                         ${w.isOwner ? `<span class="badge badge-mono badge-owner" style="font-size: var(--font-size-2xs); background: rgba(234, 179, 8, 0.12); color: #92400e; border: 1px solid rgba(234, 179, 8, 0.28); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('crown', { size: 10 })} ${w.isCloud ? 'Owner' : 'Organizer'}<!-- 👑 Owner --></span>` : ''}
                                         ${w.memberName ? `<span class="badge badge-mono badge-member" style="font-size: var(--font-size-2xs); background: var(--brand-primary-soft, #E8F0EC); color: var(--brand-primary, #18352B); border: 1px solid var(--brand-accent-border, #C9D0CB); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('user', { size: 10 })} ${escapeHtml(w.memberName)}</span>` : ''}
-                                        ${w.isCloud ? `<span class="badge badge-mono badge-cloud" style="font-size: var(--font-size-2xs); background: var(--financial-credit-bg, #E8F5F1); color: var(--financial-credit-text, #065A43); border: 1px solid var(--financial-credit-border, #B6E2D5); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('cloud', { size: 10 })} Cloud Synced<!-- ☁️ Cloud Synced --></span>` : ''}
+                                        ${w.isCloud ? `<span class="badge badge-mono badge-cloud" style="font-size: var(--font-size-2xs); background: var(--financial-credit-bg, #E8F5F1); color: var(--financial-credit-text, #065A43); border: 1px solid var(--financial-credit-border, #B6E2D5); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('cloud', { size: 10 })} Cloud Synced</span>` : (isAuthenticated ? `<span class="badge badge-mono badge-local" style="font-size: var(--font-size-2xs); background: var(--surface-secondary, #f1f5f9); color: var(--text-muted, #64748b); border: 1px solid var(--border-subtle, #cbd5e1); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('folder', { size: 10 })} Local to this browser</span>` : '')}
                                     </div>
                                     <span style="font-size: var(--font-size-2xs); color: var(--text-muted); font-family: var(--font-mono);">
                                         Last accessed: ${new Date(w.lastAccessed || Date.now()).toLocaleDateString()}
                                     </span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0;">
+                                    ${!w.isCloud && isAuthenticated && (typeof localStorage !== 'undefined' && localStorage.getItem(`smartsplit_creator_${w.token}`)) ? `
+                                        <button type="button" class="btn btn-primary btn-xs btn-claim-local-workspace" data-token="${escapeHtml(w.token)}" style="font-size: var(--font-size-2xs); padding: 3px 8px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                                            ${renderIcon('cloud', { size: 10 })}
+                                            <span>Sync to Account</span>
+                                        </button>
+                                    ` : ''}
                                     <span class="workspace-balance-badge badge badge-settled badge-mono" data-token="${escapeHtml(w.token)}" style="font-size: var(--font-size-xs); font-family: var(--font-mono);">
                                         Loading…
                                     </span>
@@ -325,6 +363,28 @@ export class LandingView {
             content,
             showFooter: false,
             onMount: (modalEl) => {
+                // Manual Sync to Account button listener in hub modal
+                modalEl.querySelectorAll('.btn-claim-local-workspace').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const token = btn.dataset.token;
+                        if (!token) return;
+                        const creatorToken = typeof localStorage !== 'undefined' ? localStorage.getItem(`smartsplit_creator_${token}`) : null;
+                        btn.disabled = true;
+                        btn.textContent = 'Syncing...';
+                        try {
+                            await api.claimWorkspace(token, creatorToken);
+                            Toast.success('Workspace linked to your account successfully.');
+                            Modal.close();
+                            await LandingView.openWorkspacesModal();
+                        } catch (err) {
+                            btn.disabled = false;
+                            btn.innerHTML = `${renderIcon('cloud', { size: 10 })} <span>Sync to Account</span>`;
+                            Toast.error(err.message || 'Failed to link workspace.');
+                        }
+                    });
+                });
+
                 // Navigation button listeners
                 modalEl.querySelectorAll('.btn-open-workspace').forEach(btn => {
                     btn.addEventListener('click', () => {
@@ -565,12 +625,17 @@ export class LandingView {
                 return;
             }
 
+            const allCloud = workspaces.every(w => w.isCloud);
+            const headerTitle = isAuthenticated
+                ? (allCloud ? 'Your Workspaces (Cloud Synced)' : 'Your Workspaces')
+                : 'Recent Workspaces';
+
             currentMount.innerHTML = `
                 <section class="landing-recents-directory">
                     <div class="landing-recents-header">
                         <div class="landing-recents-title">
-                            ${renderIcon(isAuthenticated ? 'cloud' : 'clock', { size: 14 })}
-                            <span>${isAuthenticated ? 'Your Workspaces (Cloud Synced)' : 'Recent Workspaces'}</span>
+                            ${renderIcon(isAuthenticated && allCloud ? 'cloud' : (isAuthenticated ? 'folder' : 'clock'), { size: 14 })}
+                            <span>${headerTitle}</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: var(--space-2);">
                             <span class="badge badge-settled badge-mono">${workspaces.length} ${workspaces.length === 1 ? 'Workspace' : 'Workspaces'}</span>
@@ -589,7 +654,7 @@ export class LandingView {
                                     <span class="badge badge-settled badge-mono" style="font-size: var(--font-size-2xs); padding: 1px 6px;">${escapeHtml(w.currency || 'INR')}</span>
                                     ${w.isOwner ? `<span class="badge badge-mono badge-owner" style="font-size: var(--font-size-2xs); background: rgba(234, 179, 8, 0.12); color: #92400e; border: 1px solid rgba(234, 179, 8, 0.28); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('crown', { size: 10 })} ${w.isCloud ? 'Owner' : 'Organizer'}</span>` : ''}
                                     ${w.memberName ? `<span class="badge badge-mono badge-member" style="font-size: var(--font-size-2xs); background: var(--brand-primary-soft, #E8F0EC); color: var(--brand-primary, #18352B); border: 1px solid var(--brand-accent-border, #C9D0CB); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('user', { size: 10 })} ${escapeHtml(w.memberName)}</span>` : ''}
-                                    ${w.isCloud ? `<span class="badge badge-mono badge-cloud" style="font-size: var(--font-size-2xs); background: var(--financial-credit-bg, #E8F5F1); color: var(--financial-credit-text, #065A43); border: 1px solid var(--financial-credit-border, #B6E2D5); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('check', { size: 10 })} Synced</span>` : ''}
+                                    ${w.isCloud ? `<span class="badge badge-mono badge-cloud" style="font-size: var(--font-size-2xs); background: var(--financial-credit-bg, #E8F5F1); color: var(--financial-credit-text, #065A43); border: 1px solid var(--financial-credit-border, #B6E2D5); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('check', { size: 10 })} Synced</span>` : (isAuthenticated ? `<span class="badge badge-mono badge-local" style="font-size: var(--font-size-2xs); background: var(--surface-secondary, #f1f5f9); color: var(--text-muted, #64748b); border: 1px solid var(--border-subtle, #cbd5e1); display: inline-flex; align-items: center; gap: 3px;">${renderIcon('folder', { size: 10 })} Local</span>` : '')}
                                 </div>
                                 <div class="landing-recents-meta">
                                     <span class="landing-recents-date">

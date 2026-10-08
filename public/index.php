@@ -193,6 +193,7 @@ $router->post('/api/auth/recover', [\App\Controllers\AuthController::class, 'rec
 $router->post('/api/auth/recover-password', [\App\Controllers\AuthController::class, 'recoverPassword']);
 
 // Member Identity Claiming & Cloud Workspaces
+$router->post('/api/groups/{token}/claim-workspace', [\App\Controllers\AuthController::class, 'claimWorkspace']);
 $router->post('/api/groups/{token}/claim-member', [\App\Controllers\AuthController::class, 'claimMember']);
 $router->post('/api/groups/{token}/members/{memberId}/claim', [\App\Controllers\AuthController::class, 'claimMember']);
 $router->post('/api/groups/{token}/unlink-member', [\App\Controllers\AuthController::class, 'unlinkMember']);

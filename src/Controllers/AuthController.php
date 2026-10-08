@@ -554,6 +554,230 @@ class AuthController extends BaseController
     }
 
     /**
+     * POST /api/groups/{token}/claim-workspace
+     * Securely claim ownership of a guest-created workspace and link creator member to authenticated user.
+     */
+    public function claimWorkspace(Request $request): void
+    {
+        // 1. Authenticate session
+        $currentUser = $request->getUser();
+        if (!$currentUser) {
+            $this->error("Authentication required to link workspace.", 'UNAUTHORIZED', null, 401);
+            return;
+        }
+
+        $userId = (int) $currentUser['id'];
+
+        // 2. IP & Identity Rate Limiting (30 attempts / 60s per user)
+        $rateLimiter = new RateLimiterService($this->pdo);
+        $clientIp = $request->getClientIp();
+        $rateCheck = $rateLimiter->check('auth_claim_workspace', "user_{$userId}_{$clientIp}", 30, 60);
+        if (!$rateCheck['allowed']) {
+            if (!headers_sent()) {
+                header("Retry-After: {$rateCheck['retry_after']}");
+            }
+            $this->error(
+                "Too many claim attempts. Please try again in {$rateCheck['retry_after']} seconds.",
+                'RATE_LIMITED',
+                ['retry_after' => $rateCheck['retry_after']],
+                429
+            );
+            return;
+        }
+
+        // 3. Resolve Workspace by invite token
+        $token = (string) $request->getParam('token');
+        if (trim($token) === '') {
+            $this->error("Workspace invite token is required.", 'BAD_REQUEST', null, 400);
+            return;
+        }
+
+        $group = $this->groupRepo->findByInviteToken($token);
+        if (!$group) {
+            $this->error("Workspace not found.", 'NOT_FOUND', null, 404);
+            return;
+        }
+
+        $groupId = (int) $group['id'];
+
+        // 4. Atomic Transaction with Pessimistic Row Locking
+        $this->pdo->beginTransaction();
+        try {
+            // Lock group row
+            $groupLockStmt = $this->pdo->prepare("
+                SELECT `id`, `uuid`, `name`, `currency_code`, `invite_token`, `owner_user_id`
+                FROM `groups`
+                WHERE `id` = :id
+                LIMIT 1
+                FOR UPDATE
+            ");
+            $groupLockStmt->execute([':id' => $groupId]);
+            $lockedGroup = $groupLockStmt->fetch();
+
+            if (!$lockedGroup) {
+                $this->pdo->rollBack();
+                $this->error("Workspace not found.", 'NOT_FOUND', null, 404);
+                return;
+            }
+
+            // Case B: Workspace is ALREADY owned by current user (Idempotent Success)
+            if ($lockedGroup['owner_user_id'] !== null && (int) $lockedGroup['owner_user_id'] === $userId) {
+                // Ensure creator member slot is also linked if unclaimed
+                $creatorMember = $this->memberRepo->getCreatorMember($groupId);
+                if ($creatorMember && $creatorMember['user_id'] === null) {
+                    $linkCreatorStmt = $this->pdo->prepare("
+                        UPDATE `members`
+                        SET `user_id` = :user_id
+                        WHERE `id` = :id AND `user_id` IS NULL
+                    ");
+                    $linkCreatorStmt->execute([':user_id' => $userId, ':id' => $creatorMember['id']]);
+                }
+
+                $this->pdo->commit();
+
+                $this->json([
+                    'claimed' => true,
+                    'is_owner' => true,
+                    'workspace' => [
+                        'id' => $groupId,
+                        'name' => (string) $lockedGroup['name'],
+                        'invite_token' => (string) $lockedGroup['invite_token'],
+                        'currency_code' => (string) $lockedGroup['currency_code'],
+                    ],
+                    'message' => 'Workspace is already linked to your account.',
+                ], 200);
+                return;
+            }
+
+            // Case C: Workspace belongs to another registered user (Conflict)
+            if ($lockedGroup['owner_user_id'] !== null && (int) $lockedGroup['owner_user_id'] !== $userId) {
+                $this->pdo->rollBack();
+                $this->error("This workspace is already owned by another user account.", 'WORKSPACE_ALREADY_OWNED', null, 409);
+                return;
+            }
+
+            // Case A: Workspace is unowned (groups.owner_user_id IS NULL)
+            // Resolve creator member server-side
+            $creatorLockStmt = $this->pdo->prepare("
+                SELECT `id`, `group_id`, `user_id`, `name`, `member_token`, `is_active`
+                FROM `members`
+                WHERE `group_id` = :group_id
+                ORDER BY `id` ASC
+                LIMIT 1
+                FOR UPDATE
+            ");
+            $creatorLockStmt->execute([':group_id' => $groupId]);
+            $creatorMember = $creatorLockStmt->fetch();
+
+            if (!$creatorMember || empty($creatorMember['member_token'])) {
+                $this->pdo->rollBack();
+                $this->error("Workspace creator profile not found.", 'CREATOR_NOT_FOUND', null, 404);
+                return;
+            }
+
+            // Validate Creator Authority using constant-time hash_equals
+            $creatorTokenHeader = $request->getHeader('X-Creator-Token') ?? $request->getHeader('x-creator-token');
+            $body = $request->getBody();
+            $rawCreatorToken = $creatorTokenHeader ?: ($body['creator_token'] ?? null);
+
+            if (
+                empty($rawCreatorToken) ||
+                !is_string($rawCreatorToken) ||
+                !hash_equals((string) $creatorMember['member_token'], (string) $rawCreatorToken)
+            ) {
+                $this->pdo->rollBack();
+                $this->error("Invalid or missing creator authorization token.", 'INVALID_CREATOR_TOKEN', null, 403);
+                return;
+            }
+
+            // Case D: Integrity check - if creator member is already claimed by a different user
+            if ($creatorMember['user_id'] !== null && (int) $creatorMember['user_id'] !== $userId) {
+                $this->pdo->rollBack();
+                $this->error("Workspace creator profile is linked to a different account.", 'OWNERSHIP_INTEGRITY_CONFLICT', null, 409);
+                return;
+            }
+
+            // Check if current user has already claimed a non-creator member in this workspace
+            $existingClaimStmt = $this->pdo->prepare("
+                SELECT `id`, `name` FROM `members`
+                WHERE `group_id` = :group_id AND `user_id` = :user_id AND `id` != :creator_id AND `is_active` = 1
+                LIMIT 1
+            ");
+            $existingClaimStmt->execute([':group_id' => $groupId, ':user_id' => $userId, ':creator_id' => $creatorMember['id']]);
+            $existingClaim = $existingClaimStmt->fetch();
+            if ($existingClaim) {
+                $this->pdo->rollBack();
+                $this->error(
+                    "You have already claimed member '{$existingClaim['name']}' in this workspace. A user account can only represent one member per group.",
+                    'USER_ALREADY_CLAIMED_MEMBER',
+                    ['existing_member_id' => (int) $existingClaim['id'], 'existing_member_name' => $existingClaim['name']],
+                    409
+                );
+                return;
+            }
+
+            // Execute Atomic Claim Updates
+            $updateGroupStmt = $this->pdo->prepare("
+                UPDATE `groups`
+                SET `owner_user_id` = :user_id
+                WHERE `id` = :id AND `owner_user_id` IS NULL
+            ");
+            $updateGroupStmt->execute([
+                ':user_id' => $userId,
+                ':id' => $groupId,
+            ]);
+
+            $updateMemberStmt = $this->pdo->prepare("
+                UPDATE `members`
+                SET `user_id` = :user_id
+                WHERE `id` = :id AND `group_id` = :group_id AND (`user_id` IS NULL OR `user_id` = :user_id_check)
+            ");
+            $updateMemberStmt->execute([
+                ':user_id' => $userId,
+                ':id' => $creatorMember['id'],
+                ':group_id' => $groupId,
+                ':user_id_check' => $userId,
+            ]);
+
+            // Record Activity Log
+            $this->activityLogRepo->record(
+                $groupId,
+                (int) $creatorMember['id'],
+                'WORKSPACE_CLAIMED',
+                'groups',
+                $groupId,
+                [
+                    'workspace_name' => (string) $lockedGroup['name'],
+                    'user_id' => $userId,
+                    'user_name' => (string) $currentUser['display_name'],
+                    'creator_member_id' => (int) $creatorMember['id'],
+                ]
+            );
+
+            $this->pdo->commit();
+
+            $this->json([
+                'claimed' => true,
+                'is_owner' => true,
+                'workspace' => [
+                    'id' => $groupId,
+                    'name' => (string) $lockedGroup['name'],
+                    'invite_token' => (string) $lockedGroup['invite_token'],
+                    'currency_code' => (string) $lockedGroup['currency_code'],
+                ],
+                'member_id' => (int) $creatorMember['id'],
+                'member_name' => (string) $creatorMember['name'],
+                'message' => "Workspace '{$lockedGroup['name']}' successfully linked to your account.",
+            ], 200);
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * POST /api/groups/{token}/claim-member
      * Link an existing anonymous member slot in a workspace to the authenticated user.
      */
