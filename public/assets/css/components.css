@@ -2889,4 +2889,22 @@ body[data-density="compact"] .table td {
     padding: var(--space-2) var(--space-3);
 }
 
+/* -----------------------------------------------------------------------------
+ * 23. Universal Skeleton & Shimmer Loading States
+ * ----------------------------------------------------------------------------- */
+@keyframes skeletonPulse {
+    0%, 100% {
+        opacity: 0.85;
+    }
+    50% {
+        opacity: 0.35;
+    }
+}
 
+.skeleton-shimmer {
+    background-color: var(--surface-tertiary, #E8EBE8);
+    border-radius: var(--radius-xs, 4px);
+    animation: skeletonPulse 1.4s ease-in-out infinite;
+    display: inline-block;
+    vertical-align: middle;
+}

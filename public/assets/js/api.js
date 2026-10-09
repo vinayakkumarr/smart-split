@@ -515,14 +515,18 @@ class ApiClient {
      * Get 1-on-1 direct pairwise bilateral balances.
      */
     async getBilateralBalances(token) {
-        return this.request(`/groups/${encodeURIComponent(token)}/bilateral-balances`);
+        return this.dedupedGet(`/groups/${encodeURIComponent(token)}/bilateral-balances`, () =>
+            this.request(`/groups/${encodeURIComponent(token)}/bilateral-balances`)
+        );
     }
 
     /**
      * Get visual spend analytics and category trends.
      */
     async getAnalyticsSummary(token) {
-        return this.request(`/groups/${encodeURIComponent(token)}/analytics/summary`);
+        return this.dedupedGet(`/groups/${encodeURIComponent(token)}/analytics/summary`, () =>
+            this.request(`/groups/${encodeURIComponent(token)}/analytics/summary`)
+        );
     }
 
     /**
@@ -536,21 +540,26 @@ class ApiClient {
         if (params.offset) query.set('offset', params.offset);
         if (params.entity_type) query.set('entity_type', params.entity_type);
         const qs = query.toString() ? `?${query.toString()}` : '';
-        return this.request(`/groups/${encodeURIComponent(token)}/activity-feed${qs}`);
+        const path = `/groups/${encodeURIComponent(token)}/activity-feed${qs}`;
+        return this.dedupedGet(path, () => this.request(path));
     }
 
     /**
      * Get optimized debt simplification settlement plan.
      */
     async getSettlementPlan(token) {
-        return this.request(`/groups/${encodeURIComponent(token)}/settlement-plan`);
+        return this.dedupedGet(`/groups/${encodeURIComponent(token)}/settlement-plan`, () =>
+            this.request(`/groups/${encodeURIComponent(token)}/settlement-plan`)
+        );
     }
 
     /**
      * Get itemized ledger history for a single member.
      */
     async getMemberLedger(token, memberId) {
-        return this.request(`/groups/${encodeURIComponent(token)}/members/${memberId}/ledger`);
+        return this.dedupedGet(`/groups/${encodeURIComponent(token)}/members/${encodeURIComponent(memberId)}/ledger`, () =>
+            this.request(`/groups/${encodeURIComponent(token)}/members/${encodeURIComponent(memberId)}/ledger`)
+        );
     }
 
     /**

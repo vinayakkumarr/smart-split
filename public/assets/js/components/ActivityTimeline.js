@@ -10,6 +10,29 @@ import { Toast } from './Toast.js';
 
 export class ActivityTimeline {
     /**
+     * Render pulsating skeleton timeline items during initial fetch or filter switching.
+     * @param {number} [count=4]
+     * @returns {string} HTML string
+     */
+    static renderSkeletonItems(count = 4) {
+        return Array.from({ length: count }).map(() => `
+            <div class="timeline-item">
+                <div class="timeline-badge" style="color: var(--text-subtle);">•</div>
+                <div class="timeline-card">
+                    <div class="timeline-header" style="margin-bottom: 6px;">
+                        <span class="skeleton-shimmer" style="width: 70px; height: 14px; border-radius: var(--radius-xs);"></span>
+                        <span class="skeleton-shimmer" style="width: 50px; height: 12px;"></span>
+                    </div>
+                    <div class="timeline-narrative" style="margin-top: 4px; display: flex; flex-direction: column; gap: 4px;">
+                        <span class="skeleton-shimmer" style="width: 90%; height: 13px;"></span>
+                        <span class="skeleton-shimmer" style="width: 60%; height: 13px;"></span>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    /**
      * Open the Activity Timeline modal for a group workspace.
      * @param {string} token Group invite token
      * @param {string} [currency] Default: 'INR'
@@ -18,75 +41,6 @@ export class ActivityTimeline {
         if (!token) return;
 
         let activeFilter = 'all';
-        let currentActivities = [];
-        let totalCount = 0;
-
-        const fetchAndRenderActivities = async (container, entityType = null) => {
-            const listEl = container.querySelector('#timeline-feed-list');
-            const countEl = container.querySelector('#timeline-total-count');
-            if (!listEl) return;
-
-            listEl.innerHTML = `
-                <div style="text-align: center; color: var(--text-muted); padding: var(--space-6) 0; font-size: var(--font-size-sm);">
-                    Loading activity timeline...
-                </div>
-            `;
-
-            try {
-                const params = { limit: 50 };
-                if (entityType && entityType !== 'all') {
-                    params.entity_type = entityType;
-                }
-
-                const res = await api.getActivityFeed(token, params);
-                const data = res.data || {};
-                currentActivities = data.activities || [];
-                totalCount = data.total_count || currentActivities.length;
-
-                if (countEl) {
-                    countEl.textContent = `${totalCount} event${totalCount === 1 ? '' : 's'}`;
-                }
-
-                if (currentActivities.length === 0) {
-                    listEl.innerHTML = `
-                        <div class="empty-state" style="padding: var(--space-6) var(--space-4);">
-                            <div class="empty-state-text">No activity recorded for this filter yet.</div>
-                        </div>
-                    `;
-                    return;
-                }
-
-                listEl.innerHTML = currentActivities.map((act) => {
-                    const narrative = Formatters.escapeHtml(act.narrative || '');
-                    const timeAgo = Formatters.escapeHtml(act.time_ago || Formatters.formatRelativeTime(act.created_at));
-                    const badgeClass = act.badge || 'badge-secondary';
-                    const title = Formatters.escapeHtml(act.title || 'Activity');
-
-                    return `
-                        <div class="timeline-item">
-                            <div class="timeline-badge">•</div>
-                            <div class="timeline-card">
-                                <div class="timeline-header">
-                                    <span class="timeline-title">
-                                        <span class="badge ${badgeClass}" style="font-size: var(--font-size-2xs); padding: 1px 6px;">${title}</span>
-                                    </span>
-                                    <span class="timeline-time">${timeAgo}</span>
-                                </div>
-                                <div class="timeline-narrative" style="margin-top: 4px;">
-                                    ${narrative}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            } catch (err) {
-                listEl.innerHTML = `
-                    <div style="color: var(--financial-debt); padding: var(--space-4); text-align: center; font-size: var(--font-size-sm);">
-                        ${Formatters.escapeHtml(err.message || 'Failed to load activity logs.')}
-                    </div>
-                `;
-            }
-        };
 
         const modalHtml = `
             <div>
@@ -103,7 +57,9 @@ export class ActivityTimeline {
                 </div>
 
                 <!-- Timeline Feed List -->
-                <div class="timeline-feed" id="timeline-feed-list"></div>
+                <div class="timeline-feed" id="timeline-feed-list">
+                    ${ActivityTimeline.renderSkeletonItems(4)}
+                </div>
             </div>
         `;
 
@@ -115,6 +71,90 @@ export class ActivityTimeline {
             confirmClass: 'btn-primary',
             showCancel: false,
             onMount: (overlay) => {
+                let activeRequestId = 0;
+
+                const fetchAndRenderActivities = async (container, entityType = null) => {
+                    const listEl = container.querySelector('#timeline-feed-list');
+                    const countEl = container.querySelector('#timeline-total-count');
+                    if (!listEl) return;
+
+                    const reqId = ++activeRequestId;
+                    listEl.innerHTML = ActivityTimeline.renderSkeletonItems(4);
+                    if (countEl) countEl.textContent = '...';
+
+                    try {
+                        const params = { limit: 50 };
+                        if (entityType && entityType !== 'all') {
+                            params.entity_type = entityType;
+                        }
+
+                        const res = await api.getActivityFeed(token, params);
+
+                        // Discard stale responses from prior rapid filter clicks
+                        if (reqId !== activeRequestId) return;
+
+                        const modalOverlay = document.getElementById('modal-overlay');
+                        if (!modalOverlay || !modalOverlay.classList.contains('active') || !overlay.isConnected) return;
+
+                        const data = res.data || {};
+                        const currentActivities = data.activities || [];
+                        const totalCount = data.total_count !== undefined ? data.total_count : currentActivities.length;
+
+                        if (countEl) {
+                            countEl.textContent = `${totalCount} event${totalCount === 1 ? '' : 's'}`;
+                        }
+
+                        if (currentActivities.length === 0) {
+                            listEl.innerHTML = `
+                                <div class="empty-state" style="padding: var(--space-6) var(--space-4);">
+                                    <div class="empty-state-text">No activity recorded for this filter yet.</div>
+                                </div>
+                            `;
+                            return;
+                        }
+
+                        listEl.innerHTML = currentActivities.map((act) => {
+                            const narrative = Formatters.escapeHtml(act.narrative || '');
+                            const timeAgo = Formatters.escapeHtml(act.time_ago || Formatters.formatRelativeTime(act.created_at));
+                            const badgeClass = act.badge || 'badge-secondary';
+                            const title = Formatters.escapeHtml(act.title || 'Activity');
+
+                            return `
+                                <div class="timeline-item">
+                                    <div class="timeline-badge">•</div>
+                                    <div class="timeline-card">
+                                        <div class="timeline-header">
+                                            <span class="timeline-title">
+                                                <span class="badge ${badgeClass}" style="font-size: var(--font-size-2xs); padding: 1px 6px;">${title}</span>
+                                            </span>
+                                            <span class="timeline-time">${timeAgo}</span>
+                                        </div>
+                                        <div class="timeline-narrative" style="margin-top: 4px;">
+                                            ${narrative}
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    } catch (err) {
+                        if (reqId !== activeRequestId) return;
+
+                        const modalOverlay = document.getElementById('modal-overlay');
+                        if (!modalOverlay || !modalOverlay.classList.contains('active') || !overlay.isConnected) return;
+
+                        listEl.innerHTML = `
+                            <div style="color: var(--financial-debt); padding: var(--space-4); text-align: center; font-size: var(--font-size-sm);">
+                                <div style="margin-bottom: var(--space-2);">${Formatters.escapeHtml(err.message || 'Failed to load activity logs.')}</div>
+                                <button type="button" class="btn btn-secondary btn-xs btn-retry-activity">Retry</button>
+                            </div>
+                        `;
+                        const retryBtn = listEl.querySelector('.btn-retry-activity');
+                        if (retryBtn) {
+                            retryBtn.addEventListener('click', () => fetchAndRenderActivities(container, activeFilter));
+                        }
+                    }
+                };
+
                 fetchAndRenderActivities(overlay, 'all');
 
                 const filterButtons = overlay.querySelectorAll('.timeline-chip');

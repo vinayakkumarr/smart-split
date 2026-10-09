@@ -171,32 +171,219 @@ export class BalanceSummary {
         // Attach Member Statement Drilldown triggers
         const triggers = container.querySelectorAll('.member-statement-trigger');
         triggers.forEach((row) => {
-            row.addEventListener('click', async () => {
+            row.addEventListener('click', () => {
                 const memberId = Number(row.dataset.memberId);
                 const member = balances.find((b) => Number(b.member_id || b.id) === memberId);
                 if (!member || !token) return;
+                BalanceSummary.openMemberLedgerModal(token, member, currency);
+            });
+        });
 
-                try {
-                    const res = await api.getMemberLedger(token, memberId);
-                    const ledger = res.data?.ledger || res.data || {};
-                    const paidExpenses = ledger.paid_expenses || [];
-                    const consumedExpenses = ledger.consumed_expenses || [];
+        // Attach Bilateral Balances view trigger
+        const bilateralBtn = container.querySelector('#btn-view-bilateral');
+        if (bilateralBtn) {
+            bilateralBtn.addEventListener('click', () => {
+                if (!token) return;
+                BalanceSummary.openBilateralModal(token, currency);
+            });
+        }
 
-                    const content = `
-                        <div style="margin-bottom: var(--space-3);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-secondary); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: var(--space-3);">
+        // Attach Visual Spend Analytics Modal trigger
+        const analyticsBtn = container.querySelector('#btn-view-analytics');
+        const moreCategoriesBtn = container.querySelector('#btn-more-categories');
+
+        if (analyticsBtn) analyticsBtn.addEventListener('click', () => BalanceSummary.openAnalyticsModal(token, currency));
+        if (moreCategoriesBtn) moreCategoriesBtn.addEventListener('click', () => BalanceSummary.openAnalyticsModal(token, currency));
+    }
+
+    /**
+     * Open 1-on-1 Bilateral Balances drilldown modal.
+     * @param {string} token Group invite token
+     * @param {string} [currency] Default: 'INR'
+     */
+    static openBilateralModal(token, currency = 'INR') {
+        if (!token) return;
+
+        const skeletonContent = `
+            <div style="margin-bottom: var(--space-3);">
+                <p style="font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--space-3);">
+                    Direct 1-on-1 debt relationships computed before multi-party greedy graph simplification.
+                </p>
+                <div id="bilateral-modal-content" style="display: flex; flex-direction: column; gap: var(--space-2); max-height: 280px; overflow-y: auto;">
+                    ${[1, 2, 3].map(() => `
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); background: var(--surface-secondary); border-radius: var(--radius-xs); font-size: var(--font-size-xs); border: 1px solid var(--border-subtle);">
+                            <div style="display: flex; align-items: center; gap: var(--space-2);">
+                                <span class="skeleton-shimmer" style="width: 20px; height: 20px; border-radius: 50%;"></span>
+                                <span class="skeleton-shimmer" style="width: 60px; height: 12px;"></span>
+                                <span class="skeleton-shimmer" style="width: 30px; height: 10px;"></span>
+                                <span class="skeleton-shimmer" style="width: 20px; height: 20px; border-radius: 50%;"></span>
+                                <span class="skeleton-shimmer" style="width: 60px; height: 12px;"></span>
+                            </div>
+                            <div>
+                                <span class="skeleton-shimmer" style="width: 50px; height: 14px;"></span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        Modal.open({
+            title: '1-on-1 Bilateral Debt Relationships',
+            content: skeletonContent,
+            size: 'md',
+            confirmText: 'Done',
+            confirmClass: 'btn-primary',
+            showCancel: false,
+            onMount: (modalEl) => {
+                const loadBilateral = async () => {
+                    const contentContainer = modalEl.querySelector('#bilateral-modal-content');
+                    try {
+                        const res = await api.getBilateralBalances(token);
+                        const overlay = document.getElementById('modal-overlay');
+                        if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected || !contentContainer) return;
+
+                        const pairs = res.data?.pairs || [];
+                        if (pairs.length === 0) {
+                            contentContainer.innerHTML = `
+                                <div class="empty-state" style="padding: var(--space-4);">
+                                    <div class="empty-state-text">No bilateral debts recorded yet.</div>
+                                </div>
+                            `;
+                            return;
+                        }
+
+                        contentContainer.innerHTML = pairs.map((p) => {
+                            const isSettled = p.status === 'SETTLED' || p.amount_cents === 0;
+                            return `
+                                <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); background: var(--surface-secondary); border-radius: var(--radius-xs); font-size: var(--font-size-xs); border: 1px solid var(--border-subtle);">
+                                    <div style="display: flex; align-items: center; gap: var(--space-2);">
+                                        ${Formatters.renderMemberAvatar(p.from_member_name, token, { size: 20 })}
+                                        <span><strong>${Formatters.escapeHtml(p.from_member_name)}</strong></span>
+                                        <span style="color: var(--text-muted); font-size: var(--font-size-2xs);">${isSettled ? 'is settled with' : 'owes'}</span>
+                                        ${Formatters.renderMemberAvatar(p.to_member_name, token, { size: 20 })}
+                                        <span><strong>${Formatters.escapeHtml(p.to_member_name)}</strong></span>
+                                    </div>
+                                    <div>
+                                        <strong class="tnum" style="color: ${isSettled ? 'var(--text-muted)' : 'var(--financial-debt)'};">
+                                            ${isSettled ? '₹0.00' : Formatters.formatCurrency(p.amount_cents, currency)}
+                                        </strong>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    } catch (err) {
+                        const overlay = document.getElementById('modal-overlay');
+                        if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected || !contentContainer) return;
+                        contentContainer.innerHTML = `
+                            <div style="text-align: center; padding: var(--space-4); color: var(--financial-debt); font-size: var(--font-size-xs);">
+                                <div style="margin-bottom: var(--space-2);">${Formatters.escapeHtml(err.message || 'Failed to load 1-on-1 balances.')}</div>
+                                <button type="button" class="btn btn-secondary btn-xs btn-retry-bilateral">Retry</button>
+                            </div>
+                        `;
+                        const retryBtn = contentContainer.querySelector('.btn-retry-bilateral');
+                        if (retryBtn) {
+                            retryBtn.addEventListener('click', loadBilateral);
+                        }
+                    }
+                };
+
+                loadBilateral();
+            },
+        });
+    }
+
+    /**
+     * Open individual Member Financial Statement Ledger modal.
+     * @param {string} token Group invite token
+     * @param {Object} member Member summary object from /balances
+     * @param {string} [currency] Default: 'INR'
+     */
+    static openMemberLedgerModal(token, member, currency = 'INR') {
+        const memberId = Number(member.member_id || member.id);
+        if (!memberId || !token) return;
+
+        const initialContent = `
+            <div style="margin-bottom: var(--space-3);">
+                <!-- Skeleton Net Position Header -->
+                <div id="member-ledger-header" style="display: flex; justify-content: space-between; align-items: center; background: var(--surface-secondary); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: var(--space-3);">
+                    <div>
+                        <div style="font-size: var(--font-size-2xs); text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.04em;">Net Balance Position</div>
+                        <div style="min-height: 28px; display: flex; align-items: center; margin-top: 2px;">
+                            <span class="skeleton-shimmer" style="width: 110px; height: 20px;"></span>
+                        </div>
+                    </div>
+                    <div style="text-align: right; font-size: var(--font-size-xs); font-family: var(--font-mono); color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">
+                        <div style="display: flex; align-items: center; gap: 4px;">Total Paid: <span class="skeleton-shimmer" style="width: 55px; height: 12px;"></span></div>
+                        <div style="display: flex; align-items: center; gap: 4px;">Total Share: <span class="skeleton-shimmer" style="width: 55px; height: 12px;"></span></div>
+                    </div>
+                </div>
+
+                <!-- Ledger Sections Mount Target -->
+                <div id="member-ledger-mount">
+                    <div style="font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-2);">
+                        Outlay & Contributions
+                    </div>
+                    <div style="border: 1px solid var(--border-color); border-radius: var(--radius-xs); margin-bottom: var(--space-3); padding: var(--space-2); display: flex; flex-direction: column; gap: 6px;">
+                        <span class="skeleton-shimmer" style="width: 100%; height: 16px;"></span>
+                        <span class="skeleton-shimmer" style="width: 85%; height: 16px;"></span>
+                    </div>
+
+                    <div style="font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-2);">
+                        Consumed Shares & Owed Items
+                    </div>
+                    <div style="border: 1px solid var(--border-color); border-radius: var(--radius-xs); padding: var(--space-2); display: flex; flex-direction: column; gap: 6px;">
+                        <span class="skeleton-shimmer" style="width: 100%; height: 16px;"></span>
+                        <span class="skeleton-shimmer" style="width: 90%; height: 16px;"></span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        Modal.open({
+            title: `${Formatters.escapeHtml(member.name)} — Financial Statement`,
+            content: initialContent,
+            size: 'md',
+            confirmText: 'Done',
+            confirmClass: 'btn-primary',
+            showCancel: false,
+            onMount: (modalEl) => {
+                const loadLedger = async () => {
+                    const headerEl = modalEl.querySelector('#member-ledger-header');
+                    const mountEl = modalEl.querySelector('#member-ledger-mount');
+                    try {
+                        const res = await api.getMemberLedger(token, memberId);
+                        const overlay = document.getElementById('modal-overlay');
+                        if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected || !mountEl) return;
+
+                        const ledger = res.data?.ledger || res.data || {};
+                        const paidExpenses = ledger.paid_expenses || [];
+                        const consumedExpenses = ledger.consumed_expenses || [];
+                        const settlementsSent = ledger.settlements_sent || [];
+                        const settlementsReceived = ledger.settlements_received || [];
+
+                        const totalPaid = paidExpenses.reduce((sum, p) => sum + (p.amount_paid_cents || 0), 0);
+                        const totalOwed = consumedExpenses.reduce((sum, c) => sum + (c.amount_owed_cents || 0), 0);
+                        const totalSent = settlementsSent.reduce((sum, s) => sum + (s.amount_cents || 0), 0);
+                        const totalReceived = settlementsReceived.reduce((sum, s) => sum + (s.amount_cents || 0), 0);
+                        const netBalance = (totalPaid - totalOwed) + (totalSent - totalReceived);
+
+                        if (headerEl) {
+                            headerEl.innerHTML = `
                                 <div>
                                     <div style="font-size: var(--font-size-2xs); text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.04em;">Net Balance Position</div>
-                                    <div style="font-size: var(--font-size-lg); font-weight: 700; font-family: var(--font-mono); color: ${member.net_balance_cents >= 0 ? 'var(--financial-credit)' : 'var(--financial-debt)'};">
-                                        ${member.net_balance_cents >= 0 ? '+' : ''}${Formatters.formatCurrency(member.net_balance_cents, currency)}
+                                    <div style="font-size: var(--font-size-lg); font-weight: 700; font-family: var(--font-mono); color: ${netBalance >= 0 ? 'var(--financial-credit)' : 'var(--financial-debt)'};">
+                                        ${netBalance >= 0 ? '+' : ''}${Formatters.formatCurrency(netBalance, currency)}
                                     </div>
                                 </div>
                                 <div style="text-align: right; font-size: var(--font-size-xs); font-family: var(--font-mono); color: var(--text-secondary);">
-                                    <div>Total Paid: <strong>${Formatters.formatCurrency(member.total_paid_cents || 0, currency)}</strong></div>
-                                    <div>Total Share: <strong>${Formatters.formatCurrency(member.total_owed_cents || 0, currency)}</strong></div>
+                                    <div>Total Paid: <strong>${Formatters.formatCurrency(totalPaid, currency)}</strong></div>
+                                    <div>Total Share: <strong>${Formatters.formatCurrency(totalOwed, currency)}</strong></div>
                                 </div>
-                            </div>
+                            `;
+                        }
 
+                        mountEl.innerHTML = `
                             <div style="font-size: var(--font-size-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: var(--space-2);">
                                 Outlay & Contributions (${paidExpenses.length})
                             </div>
@@ -238,87 +425,38 @@ export class BalanceSummary {
                                     </table>
                                 </div>
                             `}
-                        </div>
-                    `;
+                        `;
+                    } catch (err) {
+                        const overlay = document.getElementById('modal-overlay');
+                        if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected || !mountEl) return;
+                        if (headerEl) {
+                            headerEl.innerHTML = `
+                                <div>
+                                    <div style="font-size: var(--font-size-2xs); text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.04em;">Net Balance Position</div>
+                                    <div style="font-size: var(--font-size-sm); color: var(--text-muted); font-family: var(--font-mono);">Unavailable</div>
+                                </div>
+                                <div style="text-align: right; font-size: var(--font-size-xs); font-family: var(--font-mono); color: var(--text-secondary);">
+                                    <div>Total Paid: <strong>—</strong></div>
+                                    <div>Total Share: <strong>—</strong></div>
+                                </div>
+                            `;
+                        }
+                        mountEl.innerHTML = `
+                            <div style="text-align: center; padding: var(--space-4); color: var(--financial-debt); font-size: var(--font-size-sm);">
+                                <div style="margin-bottom: var(--space-2);">${Formatters.escapeHtml(err.message || 'Failed to load member statement.')}</div>
+                                <button type="button" class="btn btn-secondary btn-xs btn-retry-ledger">Retry</button>
+                            </div>
+                        `;
+                        const retryBtn = mountEl.querySelector('.btn-retry-ledger');
+                        if (retryBtn) {
+                            retryBtn.addEventListener('click', loadLedger);
+                        }
+                    }
+                };
 
-                    Modal.open({
-                        title: `${Formatters.escapeHtml(member.name)} — Financial Statement`,
-                        content,
-                        size: 'md',
-                        confirmText: 'Done',
-                        confirmClass: 'btn-primary',
-                        showCancel: false,
-                    });
-                } catch (err) {
-                    Toast.error(err.message || 'Failed to load member statement.');
-                }
-            });
+                loadLedger();
+            },
         });
-
-        // Attach Bilateral Balances view trigger
-        const bilateralBtn = container.querySelector('#btn-view-bilateral');
-        if (bilateralBtn) {
-            bilateralBtn.addEventListener('click', async () => {
-                if (!token) return;
-                try {
-                    const res = await api.getBilateralBalances(token);
-                    const pairs = res.data?.pairs || [];
-
-                    const content = `
-                        <div style="margin-bottom: var(--space-3);">
-                            <p style="font-size: var(--font-size-xs); color: var(--text-muted); margin-bottom: var(--space-3);">
-                                Direct 1-on-1 debt relationships computed before multi-party greedy graph simplification.
-                            </p>
-                            ${pairs.length === 0 ? `
-                                <div class="empty-state" style="padding: var(--space-4);">
-                                    <div class="empty-state-text">No bilateral debts recorded yet.</div>
-                                </div>
-                            ` : `
-                                <div style="display: flex; flex-direction: column; gap: var(--space-2); max-height: 280px; overflow-y: auto;">
-                                    ${pairs.map((p) => {
-                                        const isSettled = p.status === 'SETTLED' || p.amount_cents === 0;
-                                        return `
-                                            <div style="display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); background: var(--surface-secondary); border-radius: var(--radius-xs); font-size: var(--font-size-xs); border: 1px solid var(--border-subtle);">
-                                                <div style="display: flex; align-items: center; gap: var(--space-2);">
-                                                    ${Formatters.renderMemberAvatar(p.from_member_name, token, { size: 20 })}
-                                                    <span><strong>${Formatters.escapeHtml(p.from_member_name)}</strong></span>
-                                                    <span style="color: var(--text-muted); font-size: var(--font-size-2xs);">${isSettled ? 'is settled with' : 'owes'}</span>
-                                                    ${Formatters.renderMemberAvatar(p.to_member_name, token, { size: 20 })}
-                                                    <span><strong>${Formatters.escapeHtml(p.to_member_name)}</strong></span>
-                                                </div>
-                                                <div>
-                                                    <strong class="tnum" style="color: ${isSettled ? 'var(--text-muted)' : 'var(--financial-debt)'};">
-                                                        ${isSettled ? '₹0.00' : Formatters.formatCurrency(p.amount_cents, currency)}
-                                                    </strong>
-                                                </div>
-                                            </div>
-                                        `;
-                                    }).join('')}
-                                </div>
-                            `}
-                        </div>
-                    `;
-
-                    Modal.open({
-                        title: '1-on-1 Bilateral Debt Relationships',
-                        content,
-                        size: 'md',
-                        confirmText: 'Done',
-                        confirmClass: 'btn-primary',
-                        showCancel: false,
-                    });
-                } catch (err) {
-                    Toast.error(err.message || 'Failed to load 1-on-1 balances.');
-                }
-            });
-        }
-
-        // Attach Visual Spend Analytics Modal trigger
-        const analyticsBtn = container.querySelector('#btn-view-analytics');
-        const moreCategoriesBtn = container.querySelector('#btn-more-categories');
-
-        if (analyticsBtn) analyticsBtn.addEventListener('click', () => BalanceSummary.openAnalyticsModal(token, currency));
-        if (moreCategoriesBtn) moreCategoriesBtn.addEventListener('click', () => BalanceSummary.openAnalyticsModal(token, currency));
     }
 
     /**
@@ -328,109 +466,195 @@ export class BalanceSummary {
      */
     static async openAnalyticsModal(token, currency = 'INR') {
         if (!token) return;
-        try {
-            const res = await api.getAnalyticsSummary(token);
-            const data = res.data?.analytics || res.data || {};
-            const totalSpend = data.total_spending_cents || 0;
-            const totalTx = data.total_transactions_count || 0;
-            const avgDaily = data.average_daily_spend_cents || 0;
-            const topCategory = data.highest_category || null;
-            const topFunder = data.top_funder || null;
-            const categoryBreakdown = data.categories || data.category_breakdown || [];
-            const dailyTrends = data.daily_trends || [];
-            const memberOutlay = data.member_outlay || [];
 
-            // Render Analytics Dashboard
-            const donutSvg = BalanceSummary.generateDonutSvg(categoryBreakdown, totalSpend, currency, 150);
-            const histogramSvg = BalanceSummary.generateHistogramSvg(dailyTrends, avgDaily, currency, 480, 150);
-            const outlayHtml = BalanceSummary.generateMemberOutlayHtml(memberOutlay, currency, token);
+        const skeletonContent = `
+            <div id="analytics-modal-content" style="margin-bottom: var(--space-3);">
+                <!-- Skeleton KPI Grid -->
+                <div class="analytics-kpi-grid">
+                    ${[1, 2, 3, 4].map(() => `
+                        <div class="analytics-kpi-card">
+                            <span class="skeleton-shimmer" style="width: 60px; height: 10px; margin-bottom: 6px;"></span>
+                            <span class="skeleton-shimmer" style="width: 90px; height: 18px; margin-bottom: 4px;"></span>
+                            <span class="skeleton-shimmer" style="width: 70px; height: 10px;"></span>
+                        </div>
+                    `).join('')}
+                </div>
 
-            const modalContent = `
-                <div style="margin-bottom: var(--space-3);">
-                    <!-- Financial Intelligence KPI Grid -->
-                    <div class="analytics-kpi-grid">
-                        <div class="analytics-kpi-card">
-                            <span class="analytics-kpi-label">Total Spend</span>
-                            <span class="analytics-kpi-value">${Formatters.formatCurrency(totalSpend, currency)}</span>
-                            <span class="analytics-kpi-sub">${totalTx} transaction${totalTx === 1 ? '' : 's'}</span>
+                <!-- Skeleton Category Distribution -->
+                <div class="analytics-section-title">
+                    <span>Category Distribution</span>
+                    <span class="skeleton-shimmer" style="width: 70px; height: 16px; border-radius: var(--radius-xs);"></span>
+                </div>
+                <div class="analytics-chart-container">
+                    <div class="analytics-donut-wrapper">
+                        <div style="flex-shrink: 0; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center;">
+                            <span class="skeleton-shimmer" style="width: 120px; height: 120px; border-radius: 50%;"></span>
                         </div>
-                        <div class="analytics-kpi-card">
-                            <span class="analytics-kpi-label">Top Funder</span>
-                            <span class="analytics-kpi-value" style="font-size: var(--font-size-sm);">${topFunder ? Formatters.escapeHtml(topFunder.name) : '—'}</span>
-                            <span class="analytics-kpi-sub">${topFunder ? Formatters.formatCurrency(topFunder.paid_cents, currency) : '₹0.00'} paid</span>
-                        </div>
-                        <div class="analytics-kpi-card">
-                            <span class="analytics-kpi-label">Burn Velocity</span>
-                            <span class="analytics-kpi-value">${Formatters.formatCurrency(avgDaily, currency)}</span>
-                            <span class="analytics-kpi-sub">per active day</span>
-                        </div>
-                        <div class="analytics-kpi-card">
-                            <span class="analytics-kpi-label">Top Category</span>
-                            <span class="analytics-kpi-value" style="font-size: var(--font-size-sm);">${topCategory ? Formatters.escapeHtml(topCategory.name) : '—'}</span>
-                            <span class="analytics-kpi-sub">${topCategory ? `${topCategory.percentage}% share` : '—'}</span>
-                        </div>
-                    </div>
-
-                    <!-- Category Distribution Donut Ring -->
-                    <div class="analytics-section-title">
-                        <span>Category Distribution</span>
-                        <span class="badge badge-settled badge-mono">${categoryBreakdown.length} Categories</span>
-                    </div>
-                    <div class="analytics-chart-container">
-                        <div class="analytics-donut-wrapper">
-                            <div style="flex-shrink: 0; width: 150px; display: flex; justify-content: center;">
-                                ${donutSvg}
-                            </div>
-                            <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: var(--space-2); max-height: 180px; overflow-y: auto; padding-right: 4px;">
-                                ${categoryBreakdown.length === 0 ? `
-                                    <div style="color: var(--text-muted); font-size: var(--font-size-xs);">No categories tracked yet.</div>
-                                ` : categoryBreakdown.map(cat => `
-                                    <div style="display: flex; align-items: center; justify-content: space-between; font-size: var(--font-size-xs);">
-                                        <div style="display: flex; align-items: center; gap: 6px;">
-                                            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: ${cat.color};"></span>
-                                            <span style="font-weight: 500;">${Formatters.escapeHtml(cat.name)}</span>
-                                        </div>
-                                        <div style="text-align: right;">
-                                            <span class="tnum" style="font-weight: 600;">${Formatters.formatCurrency(cat.spent_cents, currency)}</span>
-                                            <span style="color: var(--text-muted); font-size: var(--font-size-2xs); margin-left: 4px;">(${cat.percentage}%)</span>
-                                        </div>
+                        <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: var(--space-3); padding-right: 4px;">
+                            ${[1, 2, 3, 4].map(() => `
+                                <div>
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                        <span class="skeleton-shimmer" style="width: 80px; height: 12px;"></span>
+                                        <span class="skeleton-shimmer" style="width: 50px; height: 12px;"></span>
                                     </div>
-                                `).join('')}
-                            </div>
+                                    <span class="skeleton-shimmer" style="width: 100%; height: 4px;"></span>
+                                </div>
+                            `).join('')}
                         </div>
-                    </div>
-
-                    <!-- Daily Burn Velocity Histogram -->
-                    <div class="analytics-section-title">
-                        <span>Daily Burn Rate & Velocity</span>
-                        <span style="font-size: var(--font-size-2xs); color: var(--financial-credit); font-weight: 600;">Avg Velocity Reference</span>
-                    </div>
-                    <div class="analytics-chart-container">
-                        ${histogramSvg}
-                    </div>
-
-                    <!-- Member Outlay vs Net Consumption Comparison Matrix -->
-                    <div class="analytics-section-title">
-                        <span>Capital Outlay vs Net Consumption Share</span>
-                        <span style="font-size: var(--font-size-2xs); color: var(--text-muted);">Paid Upfront vs Owed Share</span>
-                    </div>
-                    <div class="analytics-chart-container" style="padding: var(--space-3) var(--space-4);">
-                        ${outlayHtml}
                     </div>
                 </div>
-            `;
 
-            Modal.open({
-                title: 'Visual Spend Analytics & Intelligence',
-                content: modalContent,
-                size: 'lg',
-                confirmText: 'Done',
-                confirmClass: 'btn-primary',
-                showCancel: false,
-            });
-        } catch (err) {
-            Toast.error(err.message || 'Failed to load visual analytics.');
-        }
+                <!-- Skeleton Daily Burn Velocity -->
+                <div class="analytics-section-title">
+                    <span>Daily Burn Rate & Velocity</span>
+                    <span class="skeleton-shimmer" style="width: 110px; height: 12px;"></span>
+                </div>
+                <div class="analytics-chart-container" style="display: flex; align-items: flex-end; justify-content: space-around; height: 150px; padding: var(--space-3);">
+                    ${[40, 70, 30, 85, 55, 90, 60, 45, 75, 50].map(h => `
+                        <div class="skeleton-shimmer" style="width: 6%; height: ${h}%; border-radius: 2px 2px 0 0;"></div>
+                    `).join('')}
+                </div>
+
+                <!-- Skeleton Capital Outlay -->
+                <div class="analytics-section-title">
+                    <span>Capital Outlay vs Net Consumption Share</span>
+                    <span class="skeleton-shimmer" style="width: 120px; height: 12px;"></span>
+                </div>
+                <div class="analytics-chart-container" style="padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: var(--space-3);">
+                    ${[1, 2, 3].map(() => `
+                        <div>
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                <span class="skeleton-shimmer" style="width: 90px; height: 12px;"></span>
+                                <span class="skeleton-shimmer" style="width: 60px; height: 12px;"></span>
+                            </div>
+                            <span class="skeleton-shimmer" style="width: 100%; height: 6px;"></span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        Modal.open({
+            title: 'Visual Spend Analytics & Intelligence',
+            content: skeletonContent,
+            size: 'lg',
+            confirmText: 'Done',
+            confirmClass: 'btn-primary',
+            showCancel: false,
+            onMount: (modalEl) => {
+                const loadAnalytics = async () => {
+                    const contentContainer = modalEl.querySelector('#analytics-modal-content');
+                    try {
+                        const res = await api.getAnalyticsSummary(token);
+                        const overlay = document.getElementById('modal-overlay');
+                        if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected || !contentContainer) return;
+
+                        const data = res.data?.analytics || res.data || {};
+                        const totalSpend = data.total_spending_cents || 0;
+                        const totalTx = data.total_transactions_count || 0;
+                        const avgDaily = data.average_daily_spend_cents || 0;
+                        const topCategory = data.highest_category || null;
+                        const topFunder = data.top_funder || null;
+                        const categoryBreakdown = data.categories || data.category_breakdown || [];
+                        const dailyTrends = data.daily_trends || [];
+                        const memberOutlay = data.member_outlay || [];
+
+                        // Render Analytics Dashboard
+                        const donutSvg = BalanceSummary.generateDonutSvg(categoryBreakdown, totalSpend, currency, 150);
+                        const histogramSvg = BalanceSummary.generateHistogramSvg(dailyTrends, avgDaily, currency, 480, 150);
+                        const outlayHtml = BalanceSummary.generateMemberOutlayHtml(memberOutlay, currency, token);
+
+                        contentContainer.innerHTML = `
+                            <!-- Financial Intelligence KPI Grid -->
+                            <div class="analytics-kpi-grid">
+                                <div class="analytics-kpi-card">
+                                    <span class="analytics-kpi-label">Total Spend</span>
+                                    <span class="analytics-kpi-value">${Formatters.formatCurrency(totalSpend, currency)}</span>
+                                    <span class="analytics-kpi-sub">${totalTx} transaction${totalTx === 1 ? '' : 's'}</span>
+                                </div>
+                                <div class="analytics-kpi-card">
+                                    <span class="analytics-kpi-label">Top Funder</span>
+                                    <span class="analytics-kpi-value" style="font-size: var(--font-size-sm);">${topFunder ? Formatters.escapeHtml(topFunder.name) : '—'}</span>
+                                    <span class="analytics-kpi-sub">${topFunder ? Formatters.formatCurrency(topFunder.paid_cents, currency) : '₹0.00'} paid</span>
+                                </div>
+                                <div class="analytics-kpi-card">
+                                    <span class="analytics-kpi-label">Burn Velocity</span>
+                                    <span class="analytics-kpi-value">${Formatters.formatCurrency(avgDaily, currency)}</span>
+                                    <span class="analytics-kpi-sub">per active day</span>
+                                </div>
+                                <div class="analytics-kpi-card">
+                                    <span class="analytics-kpi-label">Top Category</span>
+                                    <span class="analytics-kpi-value" style="font-size: var(--font-size-sm);">${topCategory ? Formatters.escapeHtml(topCategory.name) : '—'}</span>
+                                    <span class="analytics-kpi-sub">${topCategory ? `${topCategory.percentage}% share` : '—'}</span>
+                                </div>
+                            </div>
+
+                            <!-- Category Distribution Donut Ring -->
+                            <div class="analytics-section-title">
+                                <span>Category Distribution</span>
+                                <span class="badge badge-settled badge-mono">${categoryBreakdown.length} Categories</span>
+                            </div>
+                            <div class="analytics-chart-container">
+                                <div class="analytics-donut-wrapper">
+                                    <div style="flex-shrink: 0; width: 150px; display: flex; justify-content: center;">
+                                        ${donutSvg}
+                                    </div>
+                                    <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: var(--space-2); max-height: 180px; overflow-y: auto; padding-right: 4px;">
+                                        ${categoryBreakdown.length === 0 ? `
+                                            <div style="color: var(--text-muted); font-size: var(--font-size-xs);">No categories tracked yet.</div>
+                                        ` : categoryBreakdown.map(cat => `
+                                            <div style="display: flex; align-items: center; justify-content: space-between; font-size: var(--font-size-xs);">
+                                                <div style="display: flex; align-items: center; gap: 6px;">
+                                                    <span style="display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: ${cat.color};"></span>
+                                                    <span style="font-weight: 500;">${Formatters.escapeHtml(cat.name)}</span>
+                                                </div>
+                                                <div style="text-align: right;">
+                                                    <span class="tnum" style="font-weight: 600;">${Formatters.formatCurrency(cat.spent_cents, currency)}</span>
+                                                    <span style="color: var(--text-muted); font-size: var(--font-size-2xs); margin-left: 4px;">(${cat.percentage}%)</span>
+                                                </div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Daily Burn Velocity Histogram -->
+                            <div class="analytics-section-title">
+                                <span>Daily Burn Rate & Velocity</span>
+                                <span style="font-size: var(--font-size-2xs); color: var(--financial-credit); font-weight: 600;">Avg Velocity Reference</span>
+                            </div>
+                            <div class="analytics-chart-container">
+                                ${histogramSvg}
+                            </div>
+
+                            <!-- Member Outlay vs Net Consumption Comparison Matrix -->
+                            <div class="analytics-section-title">
+                                <span>Capital Outlay vs Net Consumption Share</span>
+                                <span style="font-size: var(--font-size-2xs); color: var(--text-muted);">Paid Upfront vs Owed Share</span>
+                            </div>
+                            <div class="analytics-chart-container" style="padding: var(--space-3) var(--space-4);">
+                                ${outlayHtml}
+                            </div>
+                        `;
+                    } catch (err) {
+                        const overlay = document.getElementById('modal-overlay');
+                        if (!overlay || !overlay.classList.contains('active') || !modalEl.isConnected || !contentContainer) return;
+                        contentContainer.innerHTML = `
+                            <div style="text-align: center; padding: var(--space-6) var(--space-4); color: var(--financial-debt);">
+                                <p style="margin-bottom: var(--space-3); font-size: var(--font-size-sm);">${Formatters.escapeHtml(err.message || 'Failed to load visual analytics.')}</p>
+                                <button type="button" class="btn btn-secondary btn-sm btn-retry-analytics">Retry</button>
+                            </div>
+                        `;
+                        const retryBtn = contentContainer.querySelector('.btn-retry-analytics');
+                        if (retryBtn) {
+                            retryBtn.addEventListener('click', loadAnalytics);
+                        }
+                    }
+                };
+
+                loadAnalytics();
+            },
+        });
     }
 
     /**
