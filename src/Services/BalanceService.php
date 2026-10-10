@@ -290,16 +290,7 @@ class BalanceService
      */
     public function getAnalyticsSummary(int $groupId): array
     {
-        // 1. Total Spend
-        $totalStmt = $this->pdo->prepare("
-            SELECT COALESCE(SUM(`total_amount_cents`), 0) AS `total_spend`
-            FROM `expenses`
-            WHERE `group_id` = :group_id AND `is_deleted` = 0
-        ");
-        $totalStmt->execute([':group_id' => $groupId]);
-        $totalSpendCents = (int) $totalStmt->fetchColumn();
-
-        // 2. Category Breakdown
+        // 1. Category Breakdown
         $catStmt = $this->pdo->prepare("
             SELECT COALESCE(c.`id`, 0) AS `category_id`,
                    COALESCE(c.`slug`, 'general') AS `category_slug`,
@@ -316,6 +307,12 @@ class BalanceService
         ");
         $catStmt->execute([':group_id' => $groupId]);
         $categoryRows = $catStmt->fetchAll();
+
+        // 2. Derive Total Spend from Category Aggregation (Strict integer cents)
+        $totalSpendCents = 0;
+        foreach ($categoryRows as $r) {
+            $totalSpendCents += (int) $r['spent_cents'];
+        }
 
         $categories = array_map(function (array $r) use ($totalSpendCents) {
             $spent = (int) $r['spent_cents'];
