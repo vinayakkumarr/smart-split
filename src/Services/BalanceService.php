@@ -406,74 +406,71 @@ class BalanceService
             $memberNames[(int) $m['id']] = (string) $m['name'];
         }
 
-        // Fetch all active expenses
-        $expStmt = $this->pdo->prepare("
-            SELECT `id`, `total_amount_cents`
-            FROM `expenses`
-            WHERE `group_id` = :group_id AND `is_deleted` = 0
+        // Fetch payer allocations joined to active expenses
+        $payerStmt = $this->pdo->prepare("
+            SELECT p.`expense_id`, p.`member_id`, p.`amount_paid_cents`,
+                   e.`total_amount_cents`
+            FROM `expense_payers` p
+            JOIN `expenses` e ON p.`expense_id` = e.`id`
+            WHERE e.`group_id` = :group_id
+              AND e.`is_deleted` = 0
         ");
-        $expStmt->execute([':group_id' => $groupId]);
-        $expenses = $expStmt->fetchAll();
+        $payerStmt->execute([':group_id' => $groupId]);
+        $allPayers = $payerStmt->fetchAll();
+
+        // Fetch split allocations joined to active expenses
+        $splitStmt = $this->pdo->prepare("
+            SELECT s.`expense_id`, s.`member_id`, s.`amount_owed_cents`,
+                   e.`total_amount_cents`
+            FROM `expense_splits` s
+            JOIN `expenses` e ON s.`expense_id` = e.`id`
+            WHERE e.`group_id` = :group_id
+              AND e.`is_deleted` = 0
+        ");
+        $splitStmt->execute([':group_id' => $groupId]);
+        $allSplits = $splitStmt->fetchAll();
+
+        $expenseTotals = [];
+        $payersByExp = [];
+        foreach ($allPayers as $p) {
+            $expId = (int) $p['expense_id'];
+            $expenseTotals[$expId] = (int) $p['total_amount_cents'];
+            $payersByExp[$expId][] = [
+                'member_id' => (int) $p['member_id'],
+                'amount_paid_cents' => (int) $p['amount_paid_cents'],
+            ];
+        }
+
+        $splitsByExp = [];
+        foreach ($allSplits as $s) {
+            $expId = (int) $s['expense_id'];
+            $expenseTotals[$expId] = (int) $s['total_amount_cents'];
+            $splitsByExp[$expId][] = [
+                'member_id' => (int) $s['member_id'],
+                'amount_owed_cents' => (int) $s['amount_owed_cents'],
+            ];
+        }
 
         $pairwiseDebt = []; // [DebtorId][CreditorId] => cents
 
-        if (!empty($expenses)) {
-            $expIds = array_column($expenses, 'id');
-            $inClause = implode(',', array_fill(0, count($expIds), '?'));
+        foreach ($expenseTotals as $expId => $totalAmount) {
+            if ($totalAmount <= 0) continue;
 
-            $payerStmt = $this->pdo->prepare("
-                SELECT `expense_id`, `member_id`, `amount_paid_cents`
-                FROM `expense_payers`
-                WHERE `expense_id` IN ({$inClause})
-            ");
-            $payerStmt->execute($expIds);
-            $allPayers = $payerStmt->fetchAll();
+            $payers = $payersByExp[$expId] ?? [];
+            $splits = $splitsByExp[$expId] ?? [];
 
-            $payersByExp = [];
-            foreach ($allPayers as $p) {
-                $payersByExp[$p['expense_id']][] = [
-                    'member_id' => (int) $p['member_id'],
-                    'amount_paid_cents' => (int) $p['amount_paid_cents'],
-                ];
-            }
+            foreach ($splits as $split) {
+                $debtorId = $split['member_id'];
+                $owedTotal = $split['amount_owed_cents'];
 
-            $splitStmt = $this->pdo->prepare("
-                SELECT `expense_id`, `member_id`, `amount_owed_cents`
-                FROM `expense_splits`
-                WHERE `expense_id` IN ({$inClause})
-            ");
-            $splitStmt->execute($expIds);
-            $allSplits = $splitStmt->fetchAll();
+                foreach ($payers as $payer) {
+                    $creditorId = $payer['member_id'];
+                    if ($debtorId === $creditorId) continue;
 
-            $splitsByExp = [];
-            foreach ($allSplits as $s) {
-                $splitsByExp[$s['expense_id']][] = [
-                    'member_id' => (int) $s['member_id'],
-                    'amount_owed_cents' => (int) $s['amount_owed_cents'],
-                ];
-            }
+                    $paidAmount = $payer['amount_paid_cents'];
+                    $shareOwedToPayer = (int) round(($paidAmount * $owedTotal) / $totalAmount);
 
-            foreach ($expenses as $exp) {
-                $expId = $exp['id'];
-                $totalAmount = (int) $exp['total_amount_cents'];
-                if ($totalAmount <= 0) continue;
-
-                $payers = $payersByExp[$expId] ?? [];
-                $splits = $splitsByExp[$expId] ?? [];
-
-                foreach ($splits as $split) {
-                    $debtorId = $split['member_id'];
-                    $owedTotal = $split['amount_owed_cents'];
-
-                    foreach ($payers as $payer) {
-                        $creditorId = $payer['member_id'];
-                        if ($debtorId === $creditorId) continue;
-
-                        $paidAmount = $payer['amount_paid_cents'];
-                        $shareOwedToPayer = (int) round(($paidAmount * $owedTotal) / $totalAmount);
-
-                        $pairwiseDebt[$debtorId][$creditorId] = ($pairwiseDebt[$debtorId][$creditorId] ?? 0) + $shareOwedToPayer;
-                    }
+                    $pairwiseDebt[$debtorId][$creditorId] = ($pairwiseDebt[$debtorId][$creditorId] ?? 0) + $shareOwedToPayer;
                 }
             }
         }
