@@ -3,7 +3,7 @@
 ## Current Status
 
 The automated test baseline is organized across three integrated testing layers:
-- **76 master test suites** (50 PHP backend + 26 Vanilla ES6 frontend suites)
+- **80 master test suites registered** (52 PHP backend + 28 Vanilla ES6 frontend suites)
 - **23 logical Playwright browser tests** across 13 spec files (69 executions under 3x stress repetition)
 - **Total:** Comprehensive backend, client-state, and end-to-end browser coverage passing deterministically in the local development environment.
 
@@ -12,7 +12,7 @@ The automated test baseline is organized across three integrated testing layers:
 ## Test Layers
 
 ### Layer 1 — PHP Backend
-- **Suites:** 29 test suites
+- **Suites:** 52 test suites (registered in `tests/run_all_tests.php`)
 - **Scope:** Database schema constraints, integer Paise arithmetic, Hare-Niemeyer conservation, greedy min-cash-flow debt simplification algorithm, REST API routing, soft-delete trash & 1-click restore, dynamic UPI QR generation, multi-currency conversion, and security/adversarial boundaries.
 - **Canonical Command:**
   ```bash
@@ -20,7 +20,7 @@ The automated test baseline is organized across three integrated testing layers:
   ```
 
 ### Layer 2 — Vanilla ES6 Frontend
-- **Suites:** 22 test suites
+- **Suites:** 28 test suites (registered in `tests/run_all_tests.php` and `tests/run_frontend_tests.mjs`)
 - **Scope:** Client math parity, reactive state store, pure SVG donut charts & histogram rendering, timeline formatting, client-side QR matrix generation, multi-currency utilities, and keyboard/UI workflows.
 - **Execution:** Executed automatically through the master test runner (`php tests/run_all_tests.php`) or independently via `node tests/run_frontend_tests.mjs`.
 
@@ -37,7 +37,7 @@ The automated test baseline is organized across three integrated testing layers:
 
 | Command | Target Scope | Verification Purpose |
 |---|---|---|
-| `php tests/run_all_tests.php` | Master Test Runner (51 Suites) | Executes all 29 PHP backend suites and 22 Vanilla ES6 frontend suites synchronously. |
+| `php tests/run_all_tests.php` | Master Test Runner (80 Suites) | Executes all 52 PHP backend suites and 28 Vanilla ES6 frontend suites synchronously. |
 | `npx playwright test` | Playwright E2E Layer (23 Executions) | Executes all 23 logical browser tests across Desktop Chrome (22 tests) and Mobile Chrome (1 test). |
 | `npx playwright test --repeat-each=3` | Playwright Stress Suite (69 Executions) | Executes three consecutive iterations of all 23 logical tests (69 total browser executions) to verify zero timing flakiness or state leakage. |
 

@@ -51,6 +51,14 @@ class SettlementController extends BaseController
 
         $body = $request->getBody();
 
+        $idempotencyKey = $request->getHeader('X-Idempotency-Key') ?? ($body['idempotency_key'] ?? null);
+        if ($idempotencyKey !== null) {
+            $idempotencyKey = trim((string) $idempotencyKey);
+            if ($idempotencyKey === '' || strlen($idempotencyKey) > 128) {
+                $idempotencyKey = null;
+            }
+        }
+
         $payerId = (int) ($body['payer_id'] ?? $body['payer_member_id'] ?? 0);
         $payeeId = (int) ($body['payee_id'] ?? $body['payee_member_id'] ?? 0);
 
@@ -120,6 +128,7 @@ class SettlementController extends BaseController
             $confirmedAt = null;
         }
 
+        $isDuplicate = false;
         $settlementId = $this->settlementRepo->create(
             (int) $group['id'],
             $payerId,
@@ -132,10 +141,14 @@ class SettlementController extends BaseController
             $referenceId,
             $status,
             $confirmedBy,
-            $confirmedAt
+            $confirmedAt,
+            $idempotencyKey,
+            $isDuplicate
         );
 
-        \App\Services\EventService::broadcast((int) $group['id'], 'settlement.created', $settlementId);
+        if (!$isDuplicate) {
+            \App\Services\EventService::broadcast((int) $group['id'], 'settlement.created', $settlementId);
+        }
 
         $settlement = $this->settlementRepo->findById($settlementId);
         $updatedBalances = $this->balanceService->calculateGroupBalances((int) $group['id']);

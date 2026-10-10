@@ -54,11 +54,19 @@ window.SmartSplit = {
     refreshGroupData,
     initAuth,
     renderNavbarAuth,
+    clearStartupTimer,
 };
 
 console.log('Smart Split Financial Workspace initialized.');
-if (typeof window !== 'undefined' && window.__smartSplitStartupTimer) {
-    clearTimeout(window.__smartSplitStartupTimer);
+
+/**
+ * Safely disarm defensive startup timer when the SPA successfully renders its initial view.
+ */
+export function clearStartupTimer() {
+    if (typeof window !== 'undefined' && window.__smartSplitStartupTimer) {
+        clearTimeout(window.__smartSplitStartupTimer);
+        window.__smartSplitStartupTimer = null;
+    }
 }
 
 const mainContent = document.getElementById('main-content');
@@ -94,20 +102,33 @@ export async function initAuth() {
     }
 }
 
+let currentRefreshSeq = 0;
+let activeRefreshAbortController = null;
+
 /**
  * Fetch and refresh all group data asynchronously with offline cache fallback.
  * @param {string} token Group invite token
  */
 export async function refreshGroupData(token) {
+    if (!token) return;
+
+    // 0. Abort any previous in-flight refresh to prevent stale overwrites
+    if (activeRefreshAbortController) {
+        try { activeRefreshAbortController.abort(); } catch {}
+    }
+    activeRefreshAbortController = new AbortController();
+    const abortSignal = activeRefreshAbortController.signal;
+    const seq = ++currentRefreshSeq;
+
     try {
         // 1. Optimistic Stale-While-Revalidate: If we have a local snapshot cache, render immediately (0ms)
         let hasCache = false;
-        if (typeof localStorage !== 'undefined' && token) {
+        if (typeof localStorage !== 'undefined') {
             const cachedRaw = localStorage.getItem(`smartsplit_cache_${token}`);
             if (cachedRaw) {
                 try {
                     const cached = JSON.parse(cachedRaw);
-                    if (cached?.group) {
+                    if (cached?.group && seq === currentRefreshSeq) {
                         hasCache = true;
                         store.setState({
                             currentGroup: cached.group,
@@ -118,11 +139,14 @@ export async function refreshGroupData(token) {
                             settlements: cached.settlements || [],
                             isLoading: false,
                             isSyncing: true,
+                            error: null,
                         });
                     }
                 } catch (cacheErr) {}
             }
         }
+
+        if (seq !== currentRefreshSeq) return;
 
         if (!hasCache && !store.getState().currentGroup) {
             store.setState({ isLoading: true, isSyncing: true });
@@ -134,7 +158,8 @@ export async function refreshGroupData(token) {
         let currentGroup, members, balances, settlementPlan, expenses, settlements;
 
         try {
-            const wsRes = await api.getWorkspace(token);
+            const wsRes = await api.getWorkspace(token, { signal: abortSignal });
+            if (seq !== currentRefreshSeq) return;
             if (wsRes?.data?.group) {
                 currentGroup = wsRes.data.group;
                 members = wsRes.data.members || [];
@@ -144,14 +169,25 @@ export async function refreshGroupData(token) {
                 settlements = wsRes.data.settlements || [];
             }
         } catch (wsErr) {
+            if (seq !== currentRefreshSeq) return;
+            // If caller explicitly aborted this sequence, stop immediately
+            if (wsErr.name === 'AbortError' && !wsErr.code) return;
+
+            // If primary workspace request timed out, do not delay recovery with redundant secondary timeouts
+            if (wsErr.code === 'REQUEST_TIMEOUT' || wsErr.status === 408) {
+                throw wsErr;
+            }
+
             // Graceful fallback to concurrent multi-endpoint fetch if needed
             const [groupRes, balancesRes, planRes, expensesRes, settlementsRes] = await Promise.all([
-                api.getGroup(token),
+                api.getGroup(token, { signal: abortSignal }),
                 api.getBalances(token).catch(() => ({ data: { members: [] } })),
                 api.getSettlementPlan(token).catch(() => ({ data: { transactions: [] } })),
                 api.getExpenses(token).catch(() => ({ data: { expenses: [] } })),
                 api.getSettlements(token).catch(() => ({ data: { settlements: [] } })),
             ]);
+
+            if (seq !== currentRefreshSeq) return;
 
             currentGroup = groupRes?.data?.group;
             members = groupRes?.data?.members || [];
@@ -161,6 +197,8 @@ export async function refreshGroupData(token) {
             settlements = settlementsRes?.data?.settlements || [];
         }
 
+        if (seq !== currentRefreshSeq) return;
+
         if (currentGroup) {
             LandingView.saveWorkspace(currentGroup);
         }
@@ -169,7 +207,7 @@ export async function refreshGroupData(token) {
         api.evaluateRecurring(token).catch(() => {});
 
         // Save local snapshot cache for offline viewing and instant subsequent loads
-        if (typeof localStorage !== 'undefined' && token && currentGroup) {
+        if (typeof localStorage !== 'undefined' && currentGroup) {
             try {
                 localStorage.setItem(`smartsplit_cache_${token}`, JSON.stringify({
                     group: currentGroup,
@@ -183,6 +221,8 @@ export async function refreshGroupData(token) {
             } catch (cacheErr) {}
         }
 
+        if (seq !== currentRefreshSeq) return;
+
         store.setState({
             currentGroup,
             members,
@@ -193,10 +233,15 @@ export async function refreshGroupData(token) {
             isLoading: false,
             isSyncing: false,
             isOffline: false,
+            error: null,
         });
     } catch (err) {
+        if (seq !== currentRefreshSeq) return;
+        // If aborted by newer invocation, do not treat as error
+        if (err.name === 'AbortError' && !err.code) return;
+
         // Offline Cache Snapshot Fallback
-        if (typeof localStorage !== 'undefined' && token) {
+        if (typeof localStorage !== 'undefined') {
             const cachedRaw = localStorage.getItem(`smartsplit_cache_${token}`);
             if (cachedRaw) {
                 try {
@@ -210,8 +255,10 @@ export async function refreshGroupData(token) {
                         settlements: cached.settlements || [],
                         isLoading: false,
                         isOffline: true,
+                        isSyncing: false,
+                        error: null,
                     });
-                    Toast.info('Viewing offline workspace cache.');
+                    Toast.warning(err.code === 'REQUEST_TIMEOUT' ? 'Synchronization timed out. Viewing offline workspace cache.' : 'Viewing offline workspace cache.');
                     return;
                 } catch (parseErr) {}
             }
@@ -220,6 +267,7 @@ export async function refreshGroupData(token) {
         store.setState({
             error: err.message || 'Failed to load workspace data.',
             isLoading: false,
+            isSyncing: false,
             isOffline: typeof navigator !== 'undefined' && !navigator.onLine,
         });
     }
@@ -232,6 +280,7 @@ function renderApp(state) {
     if (!mainContent) return;
 
     if (state.activeView === 'landing') {
+        clearStartupTimer();
         LandingView.render(mainContent);
         // Remove mobile action bar if present
         document.getElementById('mobile-bottom-bar')?.remove();
@@ -239,6 +288,7 @@ function renderApp(state) {
     }
 
     if (state.activeView === 'settings') {
+        clearStartupTimer();
         SettingsView.render(mainContent);
         // Remove mobile action bar if present
         document.getElementById('mobile-bottom-bar')?.remove();
@@ -247,8 +297,9 @@ function renderApp(state) {
 
     if (state.activeView === 'dashboard') {
         if (state.isLoading) {
+            clearStartupTimer();
             mainContent.innerHTML = `
-                <div class="flex-center" style="min-height: 280px; flex-direction: column; gap: var(--space-3);">
+                <div class="flex-center" style="min-height: 280px; flex-direction: column; gap: var(--space-3);" id="dashboard-sync-loader">
                     <div class="navbar-chip-indicator" style="width: 12px; height: 12px; animation: pulse 1s infinite alternate;"></div>
                     <div style="color: var(--text-muted); font-weight: 600; font-size: 0.85rem; font-family: var(--font-mono);">
                         Synchronizing financial ledger...
@@ -259,31 +310,50 @@ function renderApp(state) {
         }
 
         if (state.error) {
+            clearStartupTimer();
             const match = window.location.hash.match(/#\/g\/([a-zA-Z0-9_-]+)/);
             const routeToken = match ? match[1] : null;
             const recentWorkspaces = LandingView.getRecentWorkspaces();
             const matchingWorkspace = routeToken ? recentWorkspaces.find(w => w.token === routeToken) : null;
+            const isNotFound = state.error?.toLowerCase().includes('not found');
+            const errorTitle = isNotFound ? 'Workspace Not Found' : 'Unable to Load Workspace';
 
             mainContent.innerHTML = `
                 <div class="panel" style="text-align: center; padding: var(--space-8) var(--space-4); max-width: 480px; margin: var(--space-8) auto;">
                     <div style="display: flex; justify-content: center; margin-bottom: var(--space-3); color: var(--financial-debt);">
                         ${renderIcon('alertTriangle', { size: 38 })}
                     </div>
-                    <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: var(--space-2);">Workspace Not Found</h2>
+                    <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: var(--space-2);">${errorTitle}</h2>
                     <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: var(--space-5); line-height: 1.5;">${Formatters.escapeHtml(state.error)}</p>
                     <div style="display: flex; flex-direction: column; gap: var(--space-2); max-width: 300px; margin: 0 auto;">
+                        ${!isNotFound && routeToken ? `
+                            <button type="button" class="btn btn-primary btn-sm" id="btn-workspace-retry" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                                ${renderIcon('zap', { size: 13 })}
+                                <span>Retry Synchronization</span>
+                            </button>
+                        ` : ''}
                         ${matchingWorkspace ? `
                             <button type="button" class="btn btn-secondary btn-sm" id="btn-404-remove-stale" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
                                 ${renderIcon('trash2', { size: 13 })}
                                 <span>Remove from My Workspaces</span>
                             </button>
                         ` : ''}
-                        <a href="#/" class="btn btn-primary btn-sm" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                        <a href="#/" class="btn ${isNotFound ? 'btn-primary' : 'btn-secondary'} btn-sm" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
                             <span>Return to Workspaces Hub</span>
                         </a>
                     </div>
                 </div>
             `;
+
+            const retryBtn = mainContent.querySelector('#btn-workspace-retry');
+            if (retryBtn && routeToken) {
+                retryBtn.onclick = () => {
+                    retryBtn.disabled = true;
+                    retryBtn.textContent = 'Retrying...';
+                    store.setState({ error: null, isLoading: true });
+                    refreshGroupData(routeToken);
+                };
+            }
 
             const removeStaleBtn = mainContent.querySelector('#btn-404-remove-stale');
             if (removeStaleBtn && routeToken) {
@@ -295,6 +365,8 @@ function renderApp(state) {
             }
             return;
         }
+
+        clearStartupTimer();
 
         const group = state.currentGroup;
         if (!group) return;

@@ -18,6 +18,30 @@ export class ExpenseModal {
     static _cachedTemplates = {};
 
     /**
+     * Generate a cryptographically secure UUIDv4 idempotency submission key.
+     * Fails closed by returning null if secure browser randomness is unavailable.
+     * @returns {string|null}
+     */
+    static generateSecureSubmissionId() {
+        try {
+            if (typeof crypto !== 'undefined') {
+                if (typeof crypto.randomUUID === 'function') {
+                    return crypto.randomUUID();
+                }
+                if (typeof crypto.getRandomValues === 'function') {
+                    const bytes = new Uint8Array(16);
+                    crypto.getRandomValues(bytes);
+                    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+                    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+                }
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    /**
      * Compute what-if projected balances for members given current balances and proposed transaction.
      * @param {Object} params
      * @param {Array} params.members
@@ -118,6 +142,13 @@ export class ExpenseModal {
         }
 
         const isEditing = !!expenseToEdit;
+
+        // Secure modal-scoped idempotency key for new expense submission (CSPRNG)
+        let submissionId = null;
+        if (!isEditing) {
+            submissionId = ExpenseModal.generateSecureSubmissionId();
+        }
+
         const source = duplicateFrom || expenseToEdit;
         const initialTitle = source ? source.title : '';
         const initialDate = isEditing ? expenseToEdit.expense_date : new Date().toISOString().split('T')[0];
@@ -1572,7 +1603,11 @@ export class ExpenseModal {
                         await api.updateExpense(token, expenseToEdit.id, payload);
                         Toast.show('Transaction updated successfully.', 'success');
                     } else {
-                        await api.createExpense(token, payload);
+                        if (!submissionId) {
+                            Toast.show('Secure cryptographic randomness is unavailable in this environment. Transaction submission prevented for security.', 'error');
+                            return;
+                        }
+                        await api.createExpense(token, payload, submissionId);
                         Toast.show('Transaction logged successfully.', 'success');
 
                         // Optionally save as template

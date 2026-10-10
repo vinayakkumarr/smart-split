@@ -67,8 +67,11 @@ class ExpenseController extends BaseController
             }
         }
 
-        $expenseId = $this->expenseService->createExpense((int) $group['id'], $request->getBody(), $idempotencyKey);
-        \App\Services\EventService::broadcast((int) $group['id'], 'expense.created', $expenseId);
+        $isDuplicate = false;
+        $expenseId = $this->expenseService->createExpense((int) $group['id'], $request->getBody(), $idempotencyKey, $isDuplicate);
+        if (!$isDuplicate) {
+            \App\Services\EventService::broadcast((int) $group['id'], 'expense.created', $expenseId);
+        }
         $expense = $this->expenseRepo->findDetailsById($expenseId);
 
         $this->json([

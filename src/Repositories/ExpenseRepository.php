@@ -54,20 +54,19 @@ class ExpenseRepository
         ?string $originalCurrencyCode = null,
         ?int $originalAmountCents = null,
         ?float $exchangeRate = null,
-        ?string $idempotencyKey = null
+        ?string $idempotencyKey = null,
+        ?bool &$isDuplicate = null
     ): int {
         return Database::transaction(function (PDO $pdo) use (
             $groupId, $title, $totalAmountCents, $splitType, $expenseDate,
             $createdByMemberId, $payers, $splits, $categoryId,
             $taxCents, $tipCents, $discountCents, $notes,
             $originalCurrencyCode, $originalAmountCents, $exchangeRate,
-            $idempotencyKey
+            $idempotencyKey, &$isDuplicate
         ): int {
-            // 1. Increment Group Version / Acquire Exclusive Row Lock to serialize group writes and prevent FK/gap deadlock
-            $versionStmt = $pdo->prepare("
-                UPDATE `groups` SET `version` = `version` + 1 WHERE `id` = :group_id
-            ");
-            $versionStmt->execute([':group_id' => $groupId]);
+            // 1. Acquire Exclusive Row Lock on group to serialize group writes without premature version bump
+            $lockStmt = $pdo->prepare("SELECT `id`, `version` FROM `groups` WHERE `id` = :group_id FOR UPDATE");
+            $lockStmt->execute([':group_id' => $groupId]);
 
             // 2. Check Server-Side Idempotency Record (if key provided)
             $trimmedKey = $idempotencyKey !== null ? trim($idempotencyKey) : '';
@@ -97,11 +96,18 @@ class ExpenseRepository
                     if ($existingIdemp['request_hash'] !== $requestHash) {
                         throw new \InvalidArgumentException("Idempotency key reused with mismatched payload data.", 409);
                     }
+                    $isDuplicate = true;
                     return (int) $existingIdemp['expense_id'];
                 }
             }
 
-            // 2. Insert Master Expense Record
+            // 3. New non-duplicate mutation: Increment Group Version NOW
+            $versionStmt = $pdo->prepare("
+                UPDATE `groups` SET `version` = `version` + 1 WHERE `id` = :group_id
+            ");
+            $versionStmt->execute([':group_id' => $groupId]);
+
+            // 4. Insert Master Expense Record
             $expenseStmt = $pdo->prepare("
                 INSERT INTO `expenses` (
                     `group_id`, `title`, `total_amount_cents`, `tax_cents`, `tip_cents`, `discount_cents`,

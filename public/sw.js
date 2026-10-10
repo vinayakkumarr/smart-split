@@ -7,11 +7,10 @@
  * - Mutations (POST, PUT, DELETE): Unintercepted native network pass-through
  */
 
-const CACHE_NAME = 'smartsplit-static-v21';
+const CACHE_NAME = 'smartsplit-static-v22';
 
 const STATIC_PRECACHE_URLS = [
     '/',
-    '/#/',
     '/manifest.json',
     '/favicon.svg',
     '/assets/css/brand.css',
@@ -52,27 +51,29 @@ const STATIC_PRECACHE_URLS = [
     '/assets/js/components/ReceiptLightbox.js',
 ];
 
-// 1. Install Event – Pre-cache core shell & assets
+// 1. Install Event – Pre-cache core shell & assets atomically
 self.addEventListener('install', (event) => {
     event.waitUntil(
         caches.open(CACHE_NAME)
-            .then((cache) => {
-                return cache.addAll(STATIC_PRECACHE_URLS).catch((err) => {
-                    console.warn('[SW] Pre-cache warning:', err);
+            .then((cache) => cache.addAll(STATIC_PRECACHE_URLS))
+            .catch((err) => {
+                console.warn('[SW] Pre-cache failed, aborting install and purging partial cache:', err);
+                return caches.delete(CACHE_NAME).finally(() => {
+                    throw err; // Re-throw to fail install and keep previous working cache/worker active
                 });
             })
             .then(() => self.skipWaiting())
     );
 });
 
-// 2. Activate Event – Clean up old versioned caches & take control immediately
+// 2. Activate Event – Clean up obsolete Smart Split caches & take control immediately
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys()
             .then((cacheNames) => {
                 return Promise.all(
                     cacheNames.map((name) => {
-                        if (name !== CACHE_NAME) {
+                        if (name.startsWith('smartsplit-') && name !== CACHE_NAME) {
                             return caches.delete(name);
                         }
                     })
@@ -109,7 +110,7 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Static Assets & App Shell: Cache-First Strategy
+    // Static Assets & App Shell: Exact-Match Cache-First with Offline Query-Agnostic Fallback
     event.respondWith(
         caches.match(request).then((cachedResponse) => {
             if (cachedResponse) {
@@ -119,6 +120,9 @@ self.addEventListener('fetch', (event) => {
                         const responseClone = networkResponse.clone();
                         caches.open(CACHE_NAME).then((cache) => {
                             cache.put(request, responseClone);
+                            if (url.search) {
+                                cache.put(url.pathname, networkResponse.clone());
+                            }
                         });
                     }
                 }).catch(() => {
@@ -128,7 +132,7 @@ self.addEventListener('fetch', (event) => {
                 return cachedResponse;
             }
 
-            // Not in cache: fetch from network and cache
+            // Version query mismatch or not in cache: fetch fresh from network
             return fetch(request).then((networkResponse) => {
                 if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
                     return networkResponse;
@@ -137,14 +141,22 @@ self.addEventListener('fetch', (event) => {
                 const responseClone = networkResponse.clone();
                 caches.open(CACHE_NAME).then((cache) => {
                     cache.put(request, responseClone);
+                    if (url.search) {
+                        cache.put(url.pathname, networkResponse.clone());
+                    }
                 });
 
                 return networkResponse;
             }).catch(() => {
-                // Navigation fallback if offline
-                if (request.mode === 'navigate') {
-                    return caches.match('/') || caches.match('/#/');
-                }
+                // Offline fallback: try query-agnostic cached asset
+                return caches.match(request, { ignoreSearch: true }).then((fallbackResponse) => {
+                    if (fallbackResponse) {
+                        return fallbackResponse;
+                    }
+                    if (request.mode === 'navigate') {
+                        return caches.match('/', { ignoreSearch: true });
+                    }
+                });
             });
         })
     );

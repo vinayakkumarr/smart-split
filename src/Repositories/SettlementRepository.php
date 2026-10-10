@@ -53,14 +53,56 @@ class SettlementRepository
         ?string $referenceId = null,
         string $status = 'PENDING',
         ?int $confirmedByMemberId = null,
-        ?string $confirmedAt = null
+        ?string $confirmedAt = null,
+        ?string $idempotencyKey = null,
+        ?bool &$isDuplicate = null
     ): int {
         return Database::transaction(function (PDO $pdo) use (
             $groupId, $payerId, $payeeId, $amountCents, $notes, $settledDate,
             $recordedByMemberId, $paymentMethod, $referenceId, $status,
-            $confirmedByMemberId, $confirmedAt
+            $confirmedByMemberId, $confirmedAt, $idempotencyKey, &$isDuplicate
         ): int {
-            // 1. Increment Group Version / Acquire Exclusive Row Lock
+            // 1. Acquire Exclusive Row Lock on group to serialize group writes without premature version bump
+            $lockStmt = $pdo->prepare("SELECT `id`, `version` FROM `groups` WHERE `id` = :group_id FOR UPDATE");
+            $lockStmt->execute([':group_id' => $groupId]);
+
+            // 2. Check Server-Side Idempotency Record (if key provided)
+            $trimmedKey = $idempotencyKey !== null ? trim($idempotencyKey) : '';
+            $requestHash = '';
+            if ($trimmedKey !== '') {
+                // Canonical deterministic hash of server-validated normalized fields
+                $normalizedPayload = [
+                    'payer_id' => $payerId,
+                    'payee_id' => $payeeId,
+                    'amount_cents' => $amountCents,
+                    'payment_method' => strtoupper(trim($paymentMethod)),
+                    'reference_id' => $referenceId !== null ? trim($referenceId) : null,
+                    'notes' => $notes !== null ? trim($notes) : null,
+                    'status' => $status,
+                ];
+                $requestHash = hash('sha256', (string) json_encode($normalizedPayload));
+
+                $checkStmt = $pdo->prepare("
+                    SELECT `settlement_id`, `request_hash` FROM `settlement_idempotency_keys`
+                    WHERE `group_id` = :group_id AND `idempotency_key` = :idempotency_key
+                    FOR UPDATE
+                ");
+                $checkStmt->execute([
+                    ':group_id' => $groupId,
+                    ':idempotency_key' => $trimmedKey,
+                ]);
+                $existingIdemp = $checkStmt->fetch(PDO::FETCH_ASSOC);
+
+                if ($existingIdemp) {
+                    if ($existingIdemp['request_hash'] !== $requestHash) {
+                        throw new \InvalidArgumentException("Idempotency key reused with mismatched payload data.", 409);
+                    }
+                    $isDuplicate = true;
+                    return (int) $existingIdemp['settlement_id'];
+                }
+            }
+
+            // 3. New non-duplicate mutation: Increment Group Version NOW
             $versionStmt = $pdo->prepare("
                 UPDATE `groups` SET `version` = `version` + 1 WHERE `id` = :group_id
             ");
@@ -98,7 +140,7 @@ class SettlementRepository
 
             $settlementId = (int) $pdo->lastInsertId();
 
-            // Record audit log
+            // 4. Record audit log
             $this->logRepo->record(
                 $groupId,
                 $actorId,
@@ -117,6 +159,20 @@ class SettlementRepository
                     'settled_date' => $date,
                 ]
             );
+
+            // 5. Record settlement idempotency key
+            if ($trimmedKey !== '') {
+                $idempInsertStmt = $pdo->prepare("
+                    INSERT INTO `settlement_idempotency_keys` (`group_id`, `idempotency_key`, `settlement_id`, `request_hash`)
+                    VALUES (:group_id, :idempotency_key, :settlement_id, :request_hash)
+                ");
+                $idempInsertStmt->execute([
+                    ':group_id' => $groupId,
+                    ':idempotency_key' => $trimmedKey,
+                    ':settlement_id' => $settlementId,
+                    ':request_hash' => $requestHash,
+                ]);
+            }
 
             return $settlementId;
         });

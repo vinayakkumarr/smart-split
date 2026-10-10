@@ -254,7 +254,7 @@ $migrationsDir = dirname(__DIR__) . '/migrations';
 $migrationFiles = glob($migrationsDir . '/*.sql');
 sort($migrationFiles);
 
-assertSec12(count($migrationFiles) === 12, 'SEC12-INV-01', 'Found exactly 12 canonical migration SQL files');
+assertSec12(count($migrationFiles) === 13, 'SEC12-INV-01', 'Found exactly 13 canonical migration SQL files');
 
 $expectedFiles = [
     '001_create_initial_schema.sql',
@@ -269,6 +269,7 @@ $expectedFiles = [
     '010_add_idempotency_keys.sql',
     '011_add_settlement_verification_lifecycle.sql',
     '012_add_user_profile_upi.sql',
+    '013_add_settlement_idempotency_keys.sql',
 ];
 
 $allNamesMatch = true;
@@ -294,20 +295,20 @@ $rootPdo->exec("DROP DATABASE IF EXISTS `{$sourceDb}`");
 $replayRes = runMigrateCli($sourceDb);
 
 assertSec12($replayRes['code'] === 0, 'SEC12-REP-01', 'Fresh migration execution completed with exit code 0');
-assertSec12(str_contains($replayRes['output'], 'Successfully applied 12 migration(s)'), 'SEC12-REP-02', 'All 12 migrations applied to empty database');
+assertSec12(str_contains($replayRes['output'], 'Successfully applied 13 migration(s)'), 'SEC12-REP-02', 'All 13 migrations applied to empty database');
 
 $srcPdo = getPdoForDb($sourceDb);
 $appliedList = $srcPdo->query("SELECT migration FROM schema_migrations ORDER BY id ASC")->fetchAll(PDO::FETCH_COLUMN);
-assertSec12(count($appliedList) === 12 && $appliedList === $expectedFiles, 'SEC12-REP-03', 'schema_migrations records exactly 12 migrations in correct order');
+assertSec12(count($appliedList) === 13 && $appliedList === $expectedFiles, 'SEC12-REP-03', 'schema_migrations records exactly 13 migrations in correct order');
 
-// Verify all 16 application tables exist in fresh database
+// Verify all application tables exist in fresh database
 $tables = $srcPdo->query("SHOW TABLES FROM `{$sourceDb}`")->fetchAll(PDO::FETCH_COLUMN);
 $expectedTables = [
     'activity_logs', 'categories', 'creator_pairing_codes', 'expense_item_assignments',
     'expense_items', 'expense_payers', 'expense_splits', 'expense_templates',
     'expenses', 'groups', 'idempotency_keys', 'members', 'rate_limits',
-    'receipt_attachments', 'recurring_rules', 'schema_migrations', 'settlements',
-    'user_sessions', 'users', 'workspace_events',
+    'receipt_attachments', 'recurring_rules', 'schema_migrations', 'settlement_idempotency_keys',
+    'settlements', 'user_sessions', 'users', 'workspace_events',
 ];
 $allTablesExist = true;
 foreach ($expectedTables as $t) {
@@ -316,7 +317,7 @@ foreach ($expectedTables as $t) {
         break;
     }
 }
-assertSec12($allTablesExist, 'SEC12-REP-04', 'All 20 required tables successfully created in fresh database');
+assertSec12($allTablesExist, 'SEC12-REP-04', 'All 21 required tables successfully created in fresh database');
 
 // Verify system categories seeded
 $catCount = (int) $srcPdo->query("SELECT COUNT(*) FROM categories WHERE is_system = 1")->fetchColumn();
@@ -332,7 +333,7 @@ assertSec12(str_contains($replay2Res['output'], 'Database is already up to date.
 
 $catCountPostReplay = (int) $srcPdo->query("SELECT COUNT(*) FROM categories WHERE is_system = 1")->fetchColumn();
 $migrationCountPostReplay = (int) $srcPdo->query("SELECT COUNT(*) FROM schema_migrations")->fetchColumn();
-assertSec12($catCountPostReplay === 7 && $migrationCountPostReplay === 12, 'SEC12-IDEM-03', 'Zero seed row or migration log duplication on repeated execution');
+assertSec12($catCountPostReplay === 7 && $migrationCountPostReplay === 13, 'SEC12-IDEM-03', 'Zero seed row or migration log duplication on repeated execution');
 
 // =============================================================================
 // SEC-12.4: HISTORICAL UPGRADE-PATH TESTING (STEPWISE MIGRATION UPGRADE)
@@ -656,7 +657,7 @@ assertSec12($restoreSuccess, 'SEC12-RST-01', 'SQL backup restored into clean dat
 // =============================================================================
 echo "--- SEC-12.9: Source vs Restored Deep Comparison ---\n";
 $rstTables = $rstPdo->query("SHOW TABLES FROM `{$restoreDb}`")->fetchAll(PDO::FETCH_COLUMN);
-assertSec12(count($rstTables) === count($expectedTables), 'SEC12-CMP-01', 'Restored database contains identical table count (20 tables)');
+assertSec12(count($rstTables) === count($expectedTables), 'SEC12-CMP-01', 'Restored database contains identical table count (21 tables)');
 
 $allRowCountsMatch = true;
 $allHashesMatch = true;

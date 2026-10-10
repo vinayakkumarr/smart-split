@@ -82,6 +82,34 @@ class ApiClient {
             config.body = JSON.stringify(options.body);
         }
 
+        // Configurable Timeout Handling with AbortController
+        const controller = new AbortController();
+        let timedOut = false;
+        let timeoutId = null;
+
+        // Default: 15s for GET requests, 30s for state mutations; options.timeout overrides
+        const isMutation = config.method && config.method !== 'GET';
+        const timeoutMs = options.timeout !== undefined ? options.timeout : (isMutation ? 30000 : 15000);
+        if (timeoutMs > 0) {
+            timeoutId = setTimeout(() => {
+                timedOut = true;
+                controller.abort();
+            }, timeoutMs);
+        }
+
+        // Forward external abort signal if provided
+        let externalAbortHandler = null;
+        if (options.signal) {
+            if (options.signal.aborted) {
+                controller.abort();
+            } else {
+                externalAbortHandler = () => controller.abort();
+                options.signal.addEventListener('abort', externalAbortHandler, { once: true });
+            }
+        }
+
+        config.signal = controller.signal;
+
         try {
             const response = await fetch(url, config);
             const data = await response.json();
@@ -97,6 +125,16 @@ class ApiClient {
 
             return data;
         } catch (err) {
+            if (timedOut) {
+                const msg = isMutation
+                    ? 'Operation timed out. The server may still be processing your request. Please check before retrying.'
+                    : 'Request timed out. Please check your network connection and try again.';
+                const timeoutError = new Error(msg);
+                timeoutError.code = 'REQUEST_TIMEOUT';
+                timeoutError.status = 408;
+                throw timeoutError;
+            }
+
             if (typeof window !== 'undefined' && !window.navigator.onLine) {
                 Toast.show('Network connection lost. You appear to be offline.', 'error');
                 const networkError = new Error('Network connection lost. You appear to be offline.');
@@ -104,6 +142,15 @@ class ApiClient {
                 throw networkError;
             }
             throw err;
+        } finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            if (options.signal && externalAbortHandler) {
+                try {
+                    options.signal.removeEventListener('abort', externalAbortHandler);
+                } catch {}
+            }
         }
     }
 
@@ -300,16 +347,16 @@ class ApiClient {
     /**
      * Get group details and member roster by token.
      */
-    async getGroup(token) {
-        return this.request(`/groups/${encodeURIComponent(token)}`);
+    async getGroup(token, options = {}) {
+        return this.request(`/groups/${encodeURIComponent(token)}`, options);
     }
 
     /**
      * Get consolidated workspace dataset (group, members, balances, settlement plan, expenses, settlements) in 1 request.
      * @param {string} token
      */
-    async getWorkspace(token) {
-        return this.request(`/groups/${encodeURIComponent(token)}/workspace`);
+    async getWorkspace(token, options = {}) {
+        return this.request(`/groups/${encodeURIComponent(token)}/workspace`, options);
     }
 
     /**
@@ -564,11 +611,19 @@ class ApiClient {
 
     /**
      * Record a direct debt payment settlement.
+     * @param {string} token
+     * @param {Object} payload
+     * @param {string|null} [idempotencyKey]
      */
-    async createSettlement(token, payload) {
+    async createSettlement(token, payload, idempotencyKey = null) {
+        const headers = {};
+        if (idempotencyKey) {
+            headers['X-Idempotency-Key'] = idempotencyKey;
+        }
         const res = await this.request(`/groups/${encodeURIComponent(token)}/settlements`, {
             method: 'POST',
             body: payload,
+            headers,
         });
         if (res?.data?.settlement?.id) {
             this.recordMutation('settlement.created', res.data.settlement.id);
@@ -578,9 +633,12 @@ class ApiClient {
 
     /**
      * Alias for createSettlement.
+     * @param {string} token
+     * @param {Object} payload
+     * @param {string|null} [idempotencyKey]
      */
-    async recordSettlement(token, payload) {
-        return this.createSettlement(token, payload);
+    async recordSettlement(token, payload, idempotencyKey = null) {
+        return this.createSettlement(token, payload, idempotencyKey);
     }
 
     /**

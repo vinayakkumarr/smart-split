@@ -89,6 +89,7 @@ const testSuites = [
     { file: 'test_p1_features.mjs', desc: 'P1 Real-Time SSE, Storage & Expense Duplication' },
     { file: 'test_p3_features.mjs', desc: 'P3 Offline Outbox Sync, PDF Reports & Spending Budget' },
     { file: 'test_settings_view.mjs', desc: 'Dedicated Settings View & Preferences Engine' },
+    { file: 'test_frontend_idempotency.mjs', desc: 'Frontend Idempotency & Cryptographic Keys Engine' },
 ];
 
 let passed = 0;

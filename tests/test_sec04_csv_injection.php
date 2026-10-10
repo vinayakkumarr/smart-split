@@ -29,7 +29,7 @@ use App\Utils\CsvSanitizer;
 Env::load(dirname(__DIR__) . '/.env');
 $pdo = Database::getConnection();
 
-$baseUrl = 'http://localhost:8000';
+$baseUrl = 'http://127.0.0.1:8000';
 
 function postJson(string $url, array $data): array {
     $ch = curl_init($url);
@@ -37,6 +37,8 @@ function postJson(string $url, array $data): array {
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'Accept: application/json', 'X-Requested-With: XMLHttpRequest']);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -48,6 +50,8 @@ function getRaw(string $url): array {
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HEADER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);

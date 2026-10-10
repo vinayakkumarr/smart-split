@@ -13,6 +13,30 @@ import { renderIcon } from '../utils/icons.js';
 import { store } from '../state.js';
 
 export class SettlementPlan {
+    /**
+     * Generate a cryptographically secure UUIDv4 idempotency submission key.
+     * Fails closed by returning null if secure browser randomness is unavailable.
+     * @returns {string|null}
+     */
+    static generateSecureSubmissionId() {
+        try {
+            if (typeof crypto !== 'undefined') {
+                if (typeof crypto.randomUUID === 'function') {
+                    return crypto.randomUUID();
+                }
+                if (typeof crypto.getRandomValues === 'function') {
+                    const bytes = new Uint8Array(16);
+                    crypto.getRandomValues(bytes);
+                    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+                    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+                }
+            }
+        } catch (_) {}
+        return null;
+    }
+
     /** @type {Map<string, 'cards' | 'diagram'>} Internal cache for active presentation view */
     static _activeViewMap = new Map();
 
@@ -250,6 +274,9 @@ export class SettlementPlan {
      */
     static openSettleModal({ token, tx, members = [], currency = 'INR', workspaceName = '', onUpdate = null }) {
         if (!tx) return;
+
+        // Secure modal-scoped idempotency key for new settlement submission (CSPRNG)
+        const submissionId = SettlementPlan.generateSecureSubmissionId();
 
         const allMembers = members.length > 0 ? members : (store.getState().members || []);
         const myClaimedMember = SettlementPlan.getMyClaimedMember(allMembers);
@@ -606,6 +633,11 @@ export class SettlementPlan {
                     notes += ` • UTR: ${cleanUtr}`;
                 }
 
+                if (!submissionId) {
+                    Toast.error('Secure cryptographic randomness is unavailable in this environment. Settlement submission prevented for security.');
+                    return;
+                }
+
                 try {
                     const res = await api.createSettlement(token, {
                         payer_id: payerId,
@@ -615,7 +647,7 @@ export class SettlementPlan {
                         reference_id: utrVal || null,
                         recorded_by_member_id: recordedByMemberId,
                         notes,
-                    });
+                    }, submissionId);
 
                     if (res?.data?.settlement?.status === 'CONFIRMED') {
                         Toast.success(`Confirmed transfer of ${Formatters.formatCurrency(amountCents, currency)}.`);

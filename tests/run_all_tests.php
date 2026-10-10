@@ -26,10 +26,11 @@ if ($fp) {
     $indexFile = $publicDir . '/index.php';
     $cmd = sprintf('"%s" -S 127.0.0.1:8000 -t "%s" "%s"', $phpBinary, $publicDir, $indexFile);
     
+    $logFile = sys_get_temp_dir() . '/smartsplit_test_server.log';
     $descriptors = [
         0 => ['pipe', 'r'],
-        1 => ['pipe', 'w'],
-        2 => ['pipe', 'w'],
+        1 => ['file', $logFile, 'w'],
+        2 => ['file', $logFile, 'w'],
     ];
     $serverProcess = proc_open($cmd, $descriptors, $pipes, dirname(__DIR__));
     if (is_resource($serverProcess)) {
@@ -98,6 +99,7 @@ $phpTests = [
     'test_gbk_remediation.php' => 'GBK-01 & GBK-02: Recurring & Template Deletion Remediation Suite',
     'test_step16_settlement_lifecycle.php' => 'Step 16: Role-Aware Settlement Lifecycle, Attribution & Reversal Suite',
     'test_personal_upi_identity.php' => 'Personal UPI Identity, Profile CRUD & Settlement Resolution',
+    'test_idempotency_comprehensive.php' => 'Comprehensive Idempotency, Concurrency & Mutation-Safety Suite',
     'master_pre_release_validation.php' => 'Final Master Pre-Release & Stress Matrix',
 ];
 
@@ -129,6 +131,7 @@ $nodeTests = [
     'test_p1_features.mjs' => 'P1 Real-Time SSE, Storage & Expense Duplication',
     'test_p3_features.mjs' => 'P3 Offline Outbox Sync, PDF Reports & Spending Budget',
     'test_settings_view.mjs' => 'Dedicated Settings View & Preferences Engine',
+    'test_mobile_stuck_skeleton_remediation.mjs' => 'Mobile Stuck Skeleton & Cache Consistency Remediation Suite',
 ];
 
 $totalSuites = count($phpTests) + count($nodeTests);

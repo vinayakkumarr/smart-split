@@ -43,7 +43,7 @@ class ExpenseService
      * @return int Created Expense ID.
      * @throws InvalidArgumentException
      */
-    public function createExpense(int $groupId, array $payload, ?string $idempotencyKey = null): int
+    public function createExpense(int $groupId, array $payload, ?string $idempotencyKey = null, ?bool &$isDuplicate = null): int
     {
         // 1. Basic Field Validations
         if (empty($payload['title']) || !is_string($payload['title']) || trim($payload['title']) === '') {
@@ -179,8 +179,13 @@ class ExpenseService
             $originalCurrencyCode,
             $originalAmountCents,
             $exchangeRate,
-            $idempotencyKey
+            $idempotencyKey,
+            $isDuplicate
         );
+
+        if ($isDuplicate) {
+            return $expenseId;
+        }
 
         if ($splitType === 'ITEMIZED' && !empty($payload['items']) && is_array($payload['items'])) {
             $this->itemRepo->saveItems($expenseId, $payload['items']);

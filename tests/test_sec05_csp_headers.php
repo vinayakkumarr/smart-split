@@ -32,6 +32,8 @@ function getHttpHeaders(string $url): array {
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HEADER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
@@ -182,7 +184,7 @@ assertSec05(
 );
 
 assertSec05(
-    str_contains($indexHtml, 'src="/assets/js/theme-init.js"') && str_contains($indexHtml, 'src="/assets/js/pwa-init.js"'),
+    str_contains($indexHtml, 'src="/assets/js/theme-init.js"') && str_contains($indexHtml, 'src="/assets/js/pwa-init.js'),
     'SEC05-T07b',
     'public/index.php references externalized theme-init.js and pwa-init.js',
     $passed,

@@ -193,7 +193,7 @@ export class OfflineManager {
                 await api.deleteExpense(item.token, item.entityId);
                 break;
             case 'CREATE_SETTLEMENT':
-                await api.createSettlement(item.token, item.payload);
+                await api.createSettlement(item.token, item.payload, item.id);
                 break;
             default:
                 throw new Error(`Unrecognized action: ${item.action}`);
@@ -317,7 +317,7 @@ export class OfflineManager {
                             await api.deleteExpense(item.token, item.entityId);
                             break;
                         case 'CREATE_SETTLEMENT':
-                            await api.createSettlement(item.token, item.payload);
+                            await api.createSettlement(item.token, item.payload, item.id);
                             break;
                         default:
                             console.warn('[Offline] Unrecognized action type:', item.action);

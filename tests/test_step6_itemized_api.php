@@ -11,7 +11,7 @@ use App\Core\Database;
 Env::load(dirname(__DIR__) . '/.env');
 $pdo = Database::getConnection();
 
-$baseUrl = 'http://localhost:8000';
+$baseUrl = 'http://127.0.0.1:8000';
 
 function postJson(string $url, array $data): array {
     $ch = curl_init($url);
@@ -19,6 +19,8 @@ function postJson(string $url, array $data): array {
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'Accept: application/json']);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -31,6 +33,8 @@ function putJson(string $url, array $data): array {
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json', 'Accept: application/json']);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -41,6 +45,8 @@ function getJson(string $url): array {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Accept: application/json']);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $res = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);

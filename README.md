@@ -7,7 +7,7 @@ Smart Split V2 is a self-hosted, zero-runtime-framework group expense and debt m
 ## 📌 Project Status
 
 - **Application Release Status:** `Release Frozen / Approved`
-- **Verification Baseline:** 78 automated master test suites (100% pass), 77 financial lifecycle invariant checks (100% pass), and 38 adversarial security test suites passed.
+- **Verification Baseline:** 80 automated master test suites (100% pass), 77 financial lifecycle invariant checks (100% pass), and 38 adversarial security test suites passed.
 - **Deployment Status:** `Not Yet Provisioned` (Production hosting infrastructure, TLS termination, and deployment pipelines are executed in a subsequent operational phase).
 
 ---
@@ -191,22 +191,15 @@ Create the MySQL database:
 CREATE DATABASE smart_split CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-Execute the 12 schema migrations in sequential order:
+Execute the database schema migrations using the automated migration runner:
 
 ```bash
-mysql -u your_mysql_user -p smart_split < migrations/001_create_initial_schema.sql
-mysql -u your_mysql_user -p smart_split < migrations/002_add_categories_and_features.sql
-mysql -u your_mysql_user -p smart_split < migrations/003_add_itemized_and_templates.sql
-mysql -u your_mysql_user -p smart_split < migrations/004_add_custom_categories.sql
-mysql -u your_mysql_user -p smart_split < migrations/005_add_multi_currency_support.sql
-mysql -u your_mysql_user -p smart_split < migrations/006_add_hybrid_authentication.sql
-mysql -u your_mysql_user -p smart_split < migrations/007_add_rate_limiting.sql
-mysql -u your_mysql_user -p smart_split < migrations/008_add_creator_pairing.sql
-mysql -u your_mysql_user -p smart_split < migrations/009_add_workspace_events.sql
-mysql -u your_mysql_user -p smart_split < migrations/010_add_idempotency_keys.sql
-mysql -u your_mysql_user -p smart_split < migrations/011_add_settlement_verification_lifecycle.sql
-mysql -u your_mysql_user -p smart_split < migrations/012_add_user_profile_upi.sql
+php bin/migrate.php
 ```
+
+The migration runner connects using your `.env` configuration (or optional CLI flags: `--host=`, `--port=`, `--db=`, `--user=`, `--pass=`), automatically ensures the `schema_migrations` tracking table exists, and applies all 13 schema migrations in sequential order idempotently.
+
+*(Manual fallback: execute the 13 schema migrations in sequential order from `migrations/001_create_initial_schema.sql` through `migrations/013_add_settlement_idempotency_keys.sql`)*.
 
 ### 4. Run Development Server
 Start the built-in PHP development server pointing to the `public/` directory:
@@ -223,7 +216,7 @@ Open your browser at `http://127.0.0.1:8000/`.
 
 ## 🗄️ Database Migrations
 
-The database schema is managed via 12 structured SQL migrations located in [migrations/](migrations/):
+The database schema is managed via 13 structured SQL migrations located in [migrations/](migrations/):
 
 | Migration | Filename | Purpose |
 |---|---|---|
@@ -239,6 +232,7 @@ The database schema is managed via 12 structured SQL migrations located in [migr
 | **010** | `010_add_idempotency_keys.sql` | API request deduplication and response caching (`idempotency_keys`) |
 | **011** | `011_add_settlement_verification_lifecycle.sql` | Settlement lifecycle states, notes, UTR numbers, verification attribution, and reversal tracking |
 | **012** | `012_add_user_profile_upi.sql` | Personal UPI ID profile attribute (`users.upi_id`) for dynamic payee settlement routing |
+| **013** | `013_add_settlement_idempotency_keys.sql` | Settlement idempotency key storage and request deduplication hash |
 
 ---
 
@@ -290,7 +284,7 @@ The database schema is managed via 12 structured SQL migrations located in [migr
 Smartsplit/
 ├── config/
 │   └── database.php                 # MySQL PDO connection settings
-├── migrations/                      # 12 Sequential SQL schema migrations
+├── migrations/                      # 13 Sequential SQL schema migrations
 │   ├── 001_create_initial_schema.sql
 │   ├── 002_add_categories_and_features.sql
 │   ├── 003_add_itemized_and_templates.sql
@@ -302,7 +296,8 @@ Smartsplit/
 │   ├── 009_add_workspace_events.sql
 │   ├── 010_add_idempotency_keys.sql
 │   ├── 011_add_settlement_verification_lifecycle.sql
-│   └── 012_add_user_profile_upi.sql
+│   ├── 012_add_user_profile_upi.sql
+│   └── 013_add_settlement_idempotency_keys.sql
 ├── public/                          # Public document root
 │   ├── index.php                    # Front controller, router & error boundary
 │   ├── favicon.svg
@@ -364,7 +359,7 @@ Smartsplit/
 │       └── Money.php                # Strict integer arithmetic utilities
 ├── storage/                         # Private storage directory (outside webroot)
 │   └── receipts/                    # Private local receipt storage with randomized/hashed filenames
-├── tests/                           # Master test suite (78 automated suites)
+├── tests/                           # Master test suite (80 automated suites)
 │   ├── run_all_tests.php            # Master test runner
 │   └── ...
 ├── .env.example                     # Environment template
@@ -445,7 +440,7 @@ All API responses follow standard JSON response envelopes:
 The Smart Split V2 test suite validates financial correctness, security boundaries, and concurrency stability:
 
 ```bash
-# Execute the full master test runner (78 automated suites)
+# Execute the full master test runner (80 automated suites)
 php tests/run_all_tests.php
 ```
 
