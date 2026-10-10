@@ -212,27 +212,48 @@ class BalanceService
         $owedStmt->execute([':group_id' => $groupId, ':member_id' => $memberId]);
         $owedItems = $owedStmt->fetchAll();
 
-        // Settlements sent
-        $sentStmt = $this->pdo->prepare("
-            SELECT s.`id` AS `settlement_id`, s.`amount_cents`, s.`settled_date`, s.`notes`, m.`name` AS `payee_name`
+        // Settlements (Consolidated Sent & Received in one parameterized query)
+        $settleStmt = $this->pdo->prepare("
+            SELECT s.`id` AS `settlement_id`, s.`amount_cents`, s.`settled_date`, s.`notes`,
+                   s.`payer_member_id`, s.`payee_member_id`,
+                   payer.`name` AS `payer_name`, payee.`name` AS `payee_name`
             FROM `settlements` s
-            JOIN `members` m ON s.`payee_member_id` = m.`id`
-            WHERE s.`group_id` = :group_id AND s.`payer_member_id` = :member_id AND s.`is_deleted` = 0
+            JOIN `members` payer ON s.`payer_member_id` = payer.`id`
+            JOIN `members` payee ON s.`payee_member_id` = payee.`id`
+            WHERE s.`group_id` = :group_id
+              AND (s.`payer_member_id` = :member_id_payer OR s.`payee_member_id` = :member_id_payee)
+              AND s.`is_deleted` = 0
             ORDER BY s.`settled_date` DESC
         ");
-        $sentStmt->execute([':group_id' => $groupId, ':member_id' => $memberId]);
-        $sentItems = $sentStmt->fetchAll();
+        $settleStmt->execute([
+            ':group_id' => $groupId,
+            ':member_id_payer' => $memberId,
+            ':member_id_payee' => $memberId,
+        ]);
+        $settleRows = $settleStmt->fetchAll();
 
-        // Settlements received
-        $recvStmt = $this->pdo->prepare("
-            SELECT s.`id` AS `settlement_id`, s.`amount_cents`, s.`settled_date`, s.`notes`, m.`name` AS `payer_name`
-            FROM `settlements` s
-            JOIN `members` m ON s.`payer_member_id` = m.`id`
-            WHERE s.`group_id` = :group_id AND s.`payee_member_id` = :member_id AND s.`is_deleted` = 0
-            ORDER BY s.`settled_date` DESC
-        ");
-        $recvStmt->execute([':group_id' => $groupId, ':member_id' => $memberId]);
-        $recvItems = $recvStmt->fetchAll();
+        $sentItems = [];
+        $recvItems = [];
+        foreach ($settleRows as $r) {
+            if ((int) $r['payer_member_id'] === $memberId) {
+                $sentItems[] = [
+                    'settlement_id' => (int) $r['settlement_id'],
+                    'payee_name' => $r['payee_name'],
+                    'amount_cents' => (int) $r['amount_cents'],
+                    'settled_date' => $r['settled_date'],
+                    'notes' => $r['notes'],
+                ];
+            }
+            if ((int) $r['payee_member_id'] === $memberId) {
+                $recvItems[] = [
+                    'settlement_id' => (int) $r['settlement_id'],
+                    'payer_name' => $r['payer_name'],
+                    'amount_cents' => (int) $r['amount_cents'],
+                    'settled_date' => $r['settled_date'],
+                    'notes' => $r['notes'],
+                ];
+            }
+        }
 
         return [
             'member' => [
@@ -256,24 +277,8 @@ class BalanceService
                     'split_value' => $r['split_value'] !== null ? (float) $r['split_value'] : null,
                 ];
             }, $owedItems),
-            'settlements_sent' => array_map(function (array $r) {
-                return [
-                    'settlement_id' => (int) $r['settlement_id'],
-                    'payee_name' => $r['payee_name'],
-                    'amount_cents' => (int) $r['amount_cents'],
-                    'settled_date' => $r['settled_date'],
-                    'notes' => $r['notes'],
-                ];
-            }, $sentItems),
-            'settlements_received' => array_map(function (array $r) {
-                return [
-                    'settlement_id' => (int) $r['settlement_id'],
-                    'payer_name' => $r['payer_name'],
-                    'amount_cents' => (int) $r['amount_cents'],
-                    'settled_date' => $r['settled_date'],
-                    'notes' => $r['notes'],
-                ];
-            }, $recvItems),
+            'settlements_sent' => $sentItems,
+            'settlements_received' => $recvItems,
         ];
     }
 

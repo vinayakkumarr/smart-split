@@ -45,6 +45,15 @@ class ActivityLogService
         $rawLogs = $this->logRepo->findByGroupId($groupId, $limit, $offset, $entityType);
         $totalCount = $this->logRepo->countByGroupId($groupId, $entityType);
 
+        if (empty($rawLogs)) {
+            return [
+                'activities' => [],
+                'total_count' => $totalCount,
+                'limit' => $limit,
+                'offset' => $offset,
+            ];
+        }
+
         // Fetch all members in this group to resolve names for participant IDs
         $members = $this->memberRepo->findByGroupId($groupId, false);
         $memberMap = [];
