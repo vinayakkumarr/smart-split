@@ -283,6 +283,9 @@ if (preg_match('/\.(png|jpg|jpeg|webp|pdf|svg|css|js|map|ico|txt|json)$/i', $req
     echo "404 Not Found";
     exit();
 }
+if (!headers_sent()) {
+    header('Cache-Control: no-cache, must-revalidate');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -299,8 +302,8 @@ if (preg_match('/\.(png|jpg|jpeg|webp|pdf|svg|css|js|map|ico|txt|json)$/i', $req
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Smart Split">
     <script src="/assets/js/theme-init.js"></script>
-    <link rel="stylesheet" href="/assets/css/brand.css">
-    <link rel="stylesheet" href="/assets/css/style.css">
+    <link rel="stylesheet" href="/assets/css/brand.css?v=2.0.4">
+    <link rel="stylesheet" href="/assets/css/style.css?v=2.0.4">
 </head>
 <body>
     <div id="app">

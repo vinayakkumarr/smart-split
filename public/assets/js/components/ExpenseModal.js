@@ -1586,17 +1586,23 @@ export class ExpenseModal {
 
                 try {
                     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-                        if (isEditing) {
-                            offlineManager.enqueue({ action: 'UPDATE_EXPENSE', token, entityId: expenseToEdit.id, payload });
-                            Toast.info('Updated transaction queued offline. Will sync automatically when connected.');
-                        } else {
-                            offlineManager.enqueue({ action: 'CREATE_EXPENSE', token, payload });
-                            Toast.info('Transaction queued offline. Will sync automatically when connected.');
+                        try {
+                            if (isEditing) {
+                                offlineManager.enqueue({ action: 'UPDATE_EXPENSE', token, entityId: expenseToEdit.id, payload });
+                                Toast.info('Updated transaction queued offline. Will sync automatically when connected.');
+                            } else {
+                                offlineManager.enqueue({ action: 'CREATE_EXPENSE', token, payload });
+                                Toast.info('Transaction queued offline. Will sync automatically when connected.');
+                            }
+                            if (typeof onSuccess === 'function') {
+                                Promise.resolve().then(() => onSuccess()).catch(() => {});
+                            }
+                            return;
+                        } catch (storageErr) {
+                            console.error('[ExpenseModal] Storage write failed during offline enqueue:', storageErr);
+                            Toast.error('Offline storage failed: Unable to save transaction locally (' + (storageErr.message || 'Storage full') + '). Your entered data has been preserved.');
+                            throw storageErr;
                         }
-                        if (typeof onSuccess === 'function') {
-                            Promise.resolve().then(() => onSuccess()).catch(() => {});
-                        }
-                        return;
                     }
 
                     if (isEditing) {
@@ -1639,17 +1645,23 @@ export class ExpenseModal {
                     }
                 } catch (err) {
                     if (err.code === 'NETWORK_OFFLINE' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-                        if (isEditing) {
-                            offlineManager.enqueue({ action: 'UPDATE_EXPENSE', token, entityId: expenseToEdit.id, payload });
-                            Toast.info('Updated transaction queued offline. Will sync automatically when connected.');
-                        } else {
-                            offlineManager.enqueue({ action: 'CREATE_EXPENSE', token, payload });
-                            Toast.info('Transaction queued offline. Will sync automatically when connected.');
+                        try {
+                            if (isEditing) {
+                                offlineManager.enqueue({ action: 'UPDATE_EXPENSE', token, entityId: expenseToEdit.id, payload });
+                                Toast.info('Updated transaction queued offline. Will sync automatically when connected.');
+                            } else {
+                                offlineManager.enqueue({ action: 'CREATE_EXPENSE', token, payload });
+                                Toast.info('Transaction queued offline. Will sync automatically when connected.');
+                            }
+                            if (typeof onSuccess === 'function') {
+                                Promise.resolve().then(() => onSuccess()).catch(() => {});
+                            }
+                            return;
+                        } catch (storageErr) {
+                            console.error('[ExpenseModal] Network offline and storage enqueue failed:', storageErr);
+                            Toast.error('Offline storage failed: Network is offline and transaction could not be saved locally (' + (storageErr.message || 'Storage full') + '). Your entered data has been preserved.');
+                            throw storageErr;
                         }
-                        if (typeof onSuccess === 'function') {
-                            Promise.resolve().then(() => onSuccess()).catch(() => {});
-                        }
-                        return;
                     }
                     Toast.show(err.message || 'Failed to save expense.', 'error');
                     throw err;

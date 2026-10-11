@@ -7,7 +7,7 @@
  * - Mutations (POST, PUT, DELETE): Unintercepted native network pass-through
  */
 
-const CACHE_NAME = 'smartsplit-static-v22';
+const CACHE_NAME = 'smartsplit-static-v23';
 
 const STATIC_PRECACHE_URLS = [
     '/',
@@ -31,6 +31,7 @@ const STATIC_PRECACHE_URLS = [
     '/assets/js/utils/preferences.js',
     '/assets/js/utils/icons.js',
     '/assets/js/utils/offline.js',
+    '/assets/js/utils/sse.js',
     '/assets/js/components/Modal.js',
     '/assets/js/components/Toast.js',
     '/assets/js/components/LandingView.js',
@@ -66,14 +67,29 @@ self.addEventListener('install', (event) => {
     );
 });
 
-// 2. Activate Event – Clean up obsolete Smart Split caches & take control immediately
+// 2. Activate Event – Bounded Generational Cache Retention (Keeps active + 1 previous release)
 self.addEventListener('activate', (event) => {
     event.waitUntil(
         caches.keys()
             .then((cacheNames) => {
+                const staticCaches = cacheNames
+                    .filter((name) => name.startsWith('smartsplit-static-'))
+                    .sort((a, b) => {
+                        const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+                        const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+                        return numB - numA;
+                    });
+
+                // Retain active CACHE_NAME + 1 immediately preceding version (bounded N=2)
+                const keepCaches = new Set([CACHE_NAME]);
+                const prevCache = staticCaches.find((name) => name !== CACHE_NAME);
+                if (prevCache) {
+                    keepCaches.add(prevCache);
+                }
+
                 return Promise.all(
                     cacheNames.map((name) => {
-                        if (name.startsWith('smartsplit-') && name !== CACHE_NAME) {
+                        if (name.startsWith('smartsplit-') && !keepCaches.has(name)) {
                             return caches.delete(name);
                         }
                     })
@@ -83,7 +99,7 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// 3. Fetch Event – Cache-First for static assets, Network-Only for API & mutations
+// 3. Fetch Event – Network-First for Navigation, Cache-First for static assets, Network-Only for API & mutations
 self.addEventListener('fetch', (event) => {
     const request = event.request;
 
@@ -106,6 +122,37 @@ self.addEventListener('fetch', (event) => {
                     headers: { 'Content-Type': 'application/json' }
                 });
             })
+        );
+        return;
+    }
+
+    // Navigation Requests (HTML App Shell): Network-First with Safe Cached Fallback
+    if (request.mode === 'navigate') {
+        event.respondWith(
+            fetch(request)
+                .then((networkResponse) => {
+                    // Only cache valid 200 responses
+                    if (networkResponse && networkResponse.status === 200 && (networkResponse.type === 'basic' || networkResponse.type === 'default')) {
+                        const responseClone = networkResponse.clone();
+                        caches.open(CACHE_NAME).then((cache) => {
+                            cache.put('/', responseClone);
+                        }).catch(() => {});
+                        return networkResponse;
+                    }
+                    // Non-200 network response: do not overwrite valid cached shell
+                    return caches.match('/', { ignoreSearch: true }).then((cachedShell) => {
+                        return cachedShell || networkResponse;
+                    });
+                })
+                .catch(() => {
+                    // Offline fallback: serve cached HTML shell
+                    return caches.match('/', { ignoreSearch: true }).then((fallbackShell) => {
+                        if (fallbackShell) {
+                            return fallbackShell;
+                        }
+                        return caches.match(request, { ignoreSearch: true });
+                    });
+                })
         );
         return;
     }

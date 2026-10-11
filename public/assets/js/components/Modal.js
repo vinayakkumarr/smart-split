@@ -222,6 +222,9 @@ export class Modal {
             Modal.closeTimeout = setTimeout(() => {
                 if (!overlay.classList.contains('active')) {
                     overlay.innerHTML = '';
+                    if (typeof window !== 'undefined' && window.__smartSplitUpdateCoordinator) {
+                        window.__smartSplitUpdateCoordinator.checkAndExecutePendingUpdate();
+                    }
                 }
                 Modal.closeTimeout = null;
             }, 200);

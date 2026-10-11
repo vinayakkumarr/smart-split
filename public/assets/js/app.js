@@ -59,6 +59,18 @@ window.SmartSplit = {
 
 console.log('Smart Split Financial Workspace initialized.');
 
+// Register Store and Offline queue subscription hooks with the Update Coordinator
+if (typeof window !== 'undefined' && window.__smartSplitUpdateCoordinator) {
+    store.subscribe(() => {
+        window.__smartSplitUpdateCoordinator.checkAndExecutePendingUpdate();
+    });
+    offlineManager.subscribe(() => {
+        if (!offlineManager.isDraining) {
+            window.__smartSplitUpdateCoordinator.checkAndExecutePendingUpdate();
+        }
+    });
+}
+
 /**
  * Safely disarm defensive startup timer when the SPA successfully renders its initial view.
  */

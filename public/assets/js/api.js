@@ -87,8 +87,10 @@ class ApiClient {
         let timedOut = false;
         let timeoutId = null;
 
-        // Default: 15s for GET requests, 30s for state mutations; options.timeout overrides
         const isMutation = config.method && config.method !== 'GET';
+        if (isMutation && typeof window !== 'undefined' && window.__smartSplitUpdateCoordinator) {
+            window.__smartSplitUpdateCoordinator.recordMutationStart();
+        }
         const timeoutMs = options.timeout !== undefined ? options.timeout : (isMutation ? 30000 : 15000);
         if (timeoutMs > 0) {
             timeoutId = setTimeout(() => {
@@ -143,6 +145,9 @@ class ApiClient {
             }
             throw err;
         } finally {
+            if (isMutation && typeof window !== 'undefined' && window.__smartSplitUpdateCoordinator) {
+                window.__smartSplitUpdateCoordinator.recordMutationEnd();
+            }
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }
@@ -152,6 +157,17 @@ class ApiClient {
                 } catch {}
             }
         }
+    }
+
+    /**
+     * Get count of active in-flight mutation requests.
+     * @returns {number}
+     */
+    getActiveMutationCount() {
+        if (typeof window !== 'undefined' && window.__smartSplitUpdateCoordinator) {
+            return window.__smartSplitUpdateCoordinator.inFlightMutations;
+        }
+        return 0;
     }
 
     /**

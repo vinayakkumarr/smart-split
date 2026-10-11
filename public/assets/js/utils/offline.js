@@ -72,17 +72,35 @@ export class OfflineManager {
 
     /**
      * Save queue to storage and notify subscribers.
+     * Propagates errors on storage write failures to uphold durable persistence guarantees.
      * @param {Array<Object>} queue
+     * @throws {Error} If localStorage is unavailable, quota is exceeded, or serialization fails.
      * @private
      */
     saveQueue(queue) {
-        if (typeof localStorage === 'undefined') return;
+        if (typeof localStorage === 'undefined') {
+            const err = new Error('Device storage (localStorage) is unavailable in this environment.');
+            err.code = 'STORAGE_UNAVAILABLE';
+            throw err;
+        }
+        let serialized = '';
         try {
-            localStorage.setItem(this.storageKey, JSON.stringify(queue));
-            this.notify();
+            serialized = JSON.stringify(queue);
+        } catch (jsonErr) {
+            const err = new Error('Failed to serialize offline queue: ' + (jsonErr?.message || 'serialization error'));
+            err.code = 'SERIALIZATION_FAILED';
+            throw err;
+        }
+        try {
+            localStorage.setItem(this.storageKey, serialized);
         } catch (err) {
             console.error('[Offline] Failed to save queue to localStorage:', err);
+            const storageErr = new Error('Failed to persist offline queue to device storage: ' + (err.message || err.name || 'QuotaExceededError'));
+            storageErr.code = (err.name === 'QuotaExceededError' || err.code === 22) ? 'QUOTA_EXCEEDED' : 'STORAGE_WRITE_FAILED';
+            storageErr.cause = err;
+            throw storageErr;
         }
+        this.notify();
     }
 
     /**
@@ -222,12 +240,14 @@ export class OfflineManager {
 
     /**
      * Enqueue an action to be executed when back online.
+     * Guarantees synchronous disk persistence before reporting success.
      * @param {Object} actionItem
      * @param {string} actionItem.action Action type: 'CREATE_EXPENSE', 'UPDATE_EXPENSE', 'DELETE_EXPENSE', 'CREATE_SETTLEMENT'
      * @param {string} actionItem.token Group invite token
      * @param {Object} actionItem.payload Action payload data
      * @param {string|number} [actionItem.entityId] Target entity ID (for update/delete)
      * @returns {Object} Enqueued action with generated idempotencyKey
+     * @throws {Error} If persisting the queue to device storage fails.
      */
     enqueue({ action, token, payload, entityId = null }) {
         const queue = this.getQueue();
@@ -241,8 +261,8 @@ export class OfflineManager {
             timestamp: Date.now(),
         };
 
-        queue.push(item);
-        this.saveQueue(queue);
+        const updatedQueue = [...queue, item];
+        this.saveQueue(updatedQueue);
         return item;
     }
 
@@ -253,7 +273,11 @@ export class OfflineManager {
     remove(id) {
         let queue = this.getQueue();
         queue = queue.filter(item => item.id !== id);
-        this.saveQueue(queue);
+        try {
+            this.saveQueue(queue);
+        } catch (err) {
+            console.error('[Offline] Failed to save queue after removing item:', err);
+        }
     }
 
     /**
@@ -355,6 +379,7 @@ export class OfflineManager {
             }
         } finally {
             this.isDraining = false;
+            this.notify();
         }
 
         // Inform user with appropriate summary notifications
