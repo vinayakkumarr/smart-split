@@ -1,14 +1,17 @@
 # Smart Split V2
 
-Smart Split V2 is a self-hosted, zero-runtime-framework group expense and debt management application designed around deterministic financial calculations, explicit settlement workflows, and strong workspace isolation.
+Smart Split V2 is a self-hosted group expense and debt management application designed around deterministic financial calculations, explicit settlement workflows, and workspace isolation. It runs without external runtime frameworks on the backend or frontend.
+
+**Live Application:** [https://smart-split-m8zn.onrender.com/](https://smart-split-m8zn.onrender.com/)
 
 ---
 
 ## 📌 Project Status
 
-- **Application Release Status:** `Release Frozen / Approved`
-- **Verification Baseline:** 80 automated master test suites (100% pass), 77 financial lifecycle invariant checks (100% pass), and 38 adversarial security test suites passed.
-- **Deployment Status:** `Not Yet Provisioned` (Production hosting infrastructure, TLS termination, and deployment pipelines are executed in a subsequent operational phase).
+- **Application Release:** `v2.0.4`
+- **Deployment Status:** Live on Render ([smart-split-m8zn.onrender.com](https://smart-split-m8zn.onrender.com/))
+- **Test Baseline:** 80 automated PHP backend suites, 20 PWA lifecycle and storage invariant suites, and 10 Playwright Chromium browser E2E suites passing.
+- **Security Baseline:** 77 financial lifecycle state checks and 38 adversarial security test suites passed.
 
 ---
 
@@ -47,6 +50,13 @@ Smart Split V2 is a self-hosted, zero-runtime-framework group expense and debt m
 - **Reusable Split Templates:** Save and apply recurring expense split configurations.
 - **Private Receipt Storage:** Secure uploads for JPEG, PNG, WebP, and PDF receipt files (up to 5 MB) stored outside the web root with randomized filenames and binary streaming endpoints.
 - **Immutable Activity Audit Log:** Chronological, tamper-evident audit trail capturing all expense, member, and settlement modifications.
+
+### 5. Progressive Web App (PWA) & Offline Resilience
+- **Installable PWA:** Configured with `manifest.json` for standalone installation on mobile and desktop devices.
+- **Service Worker Lifecycle:** Implements Network-First navigation with fallback to the cached application shell, and exact-match Cache-First delivery for static assets (`sw.js`).
+- **Generational Cache Retention:** Retains the active cache plus one previous version ($N=2$) to ensure older browser tabs retain asset access across service worker updates.
+- **Offline Mutation Outbox:** Expenses created while disconnected are queued in local storage with UUID idempotency keys and automatically synchronized when connectivity returns. Storage write failures fail closed to preserve unsubmitted form data.
+- **Update Coordinator:** Defers background application reloads while modals are open, financial mutations are in flight, or unsaved form input is present.
 
 ---
 
@@ -124,10 +134,12 @@ Every balance calculation verifies this invariant. Any deviation immediately fai
 | **Database Engine** | MySQL 8.0+ | InnoDB storage engine, ACID transactions, `utf8mb4_unicode_ci` charset, row-level locking |
 | **Database Driver** | PDO MySQL (`pdo_mysql`) | Parameterized prepared statements, exception mode, non-persistent connection lifecycle |
 | **Frontend Architecture** | Vanilla ES6+ Modules | Modular single-page application (SPA), client-side hash router, reactive Pub/Sub store |
+| **PWA & Offline** | Service Worker & Web Manifest | Network-First shell navigation, generational cache retention ($N=2$), offline queue with idempotency keys |
 | **Styling & UI** | CSS3 Custom Properties | Mobile-first responsive layout, dark/light theme switching, CSS Grid/Flexbox |
 | **Visualizations** | Native Vector SVG | Inline SVG chart engines (Donut rings & Bar histograms) generated client-side |
 | **File Storage** | Private Local Filesystem | `storage/receipts/` outside document root with binary streaming via controller |
-| **Test Tooling** | PHP CLI & Node.js | Custom test runners for backend integration, invariant verification, and frontend unit checks |
+| **Production Container** | Docker (Alpine Linux) | Containerized PHP 8.3-FPM and Nginx reverse proxy running as unprivileged `www-data` |
+| **Test Tooling** | PHP CLI, Node.js & Playwright | Test runners for backend integration, invariant verification, and browser E2E lifecycle testing |
 
 ---
 
@@ -149,7 +161,8 @@ Every balance calculation verifies this invariant. Any deviation immediately fai
 - **Runtime Packages:** **Zero.** Smart Split has zero Composer or NPM runtime package dependencies.
 
 ### Development & Test Dependencies
-- **Node.js (v18+)**: Used exclusively for executing client-side unit and DOM test suites.
+- **Node.js (v18+)**: Used for client-side unit tests, PWA lifecycle tests, and invariant checks.
+- **Playwright (`@playwright/test`)**: Used for end-to-end browser testing, service worker upgrades, and mobile viewports.
 
 ---
 
@@ -173,13 +186,17 @@ APP_ENV="local"
 APP_DEBUG=true
 APP_URL="http://127.0.0.1:8000"
 
-DB_CONNECTION="mysql"
+# Database Configuration (MySQL 8.0+)
 DB_HOST="127.0.0.1"
 DB_PORT=3306
-DB_DATABASE="smart_split"
-DB_USERNAME="your_mysql_user"
-DB_PASSWORD="your_mysql_password"
+DB_NAME="smart_split"
+DB_USER="your_mysql_user"
+DB_PASS="your_mysql_password"
 DB_CHARSET="utf8mb4"
+
+# Security & Sessions
+APP_KEY="secret_app_key_replace_in_production"
+SESSION_LIFETIME=86400
 
 DEFAULT_CURRENCY="INR"
 ```
@@ -284,6 +301,11 @@ The database schema is managed via 13 structured SQL migrations located in [migr
 Smartsplit/
 ├── config/
 │   └── database.php                 # MySQL PDO connection settings
+├── docker/                          # Container runtime configuration
+│   ├── entrypoint.sh                # Container bootstrap script
+│   ├── nginx.conf                   # Nginx reverse proxy & cache headers
+│   ├── php-fpm.conf                 # PHP-FPM pool configuration
+│   └── php.ini                      # Production PHP runtime directives
 ├── migrations/                      # 13 Sequential SQL schema migrations
 │   ├── 001_create_initial_schema.sql
 │   ├── 002_add_categories_and_features.sql
@@ -306,7 +328,11 @@ Smartsplit/
 │   └── assets/
 │       ├── css/                     # Application stylesheets
 │       │   ├── brand.css
-│       │   └── style.css
+│       │   ├── components.css
+│       │   ├── layout.css
+│       │   ├── print.css
+│       │   ├── style.css
+│       │   └── variables.css
 │       └── js/                      # Vanilla ES6 SPA architecture
 │           ├── app.js               # Application bootstrap & coordinator
 │           ├── state.js             # Reactive Pub/Sub state store
@@ -359,9 +385,13 @@ Smartsplit/
 │       └── Money.php                # Strict integer arithmetic utilities
 ├── storage/                         # Private storage directory (outside webroot)
 │   └── receipts/                    # Private local receipt storage with randomized/hashed filenames
-├── tests/                           # Master test suite (80 automated suites)
-│   ├── run_all_tests.php            # Master test runner
-│   └── ...
+├── tests/                           # Master test suite
+│   ├── run_all_tests.php            # 80-suite backend master runner
+│   ├── test_mobile_stuck_skeleton_remediation.mjs # 20-suite PWA behavioral tests
+│   └── e2e/                         # Playwright browser end-to-end specs
+├── Dockerfile                       # Multi-stage production container definition
+├── package.json                     # Test scripts and Playwright devDependencies
+├── playwright.config.js             # Playwright browser automation config
 ├── .env.example                     # Environment template
 └── README.md                        # Documentation
 ```
@@ -440,8 +470,16 @@ All API responses follow standard JSON response envelopes:
 The Smart Split V2 test suite validates financial correctness, security boundaries, and concurrency stability:
 
 ```bash
-# Execute the full master test runner (80 automated suites)
+# 1. Execute the full backend master test runner (80 automated suites)
 php tests/run_all_tests.php
+
+# 2. Execute PWA lifecycle, storage failure, and behavioral invariant tests (20 suites)
+node tests/test_mobile_stuck_skeleton_remediation.mjs
+
+# 3. Execute browser end-to-end tests via Playwright
+npm run test:e2e
+# or
+npx playwright test tests/e2e/specs/pwa-autoupdate.spec.js
 ```
 
 ### Verified Test Coverage Highlights
@@ -473,10 +511,10 @@ php tests/run_all_tests.php
 
 ## 📑 Current Architectural Boundaries & Non-Goals
 
-- **Production Infrastructure:** The current repository represents an application-level release freeze. Production deployment has not yet been performed. Infrastructure provisioning, HTTPS/TLS termination, database provisioning, backup configuration, and deployment rehearsal remain operational steps outside the current application release freeze.
+- **Production Hosting:** The application is deployed on Render using a Docker container (Alpine Linux, PHP 8.3-FPM, Nginx) behind Cloudflare edge TLS. Production database persistence and backups are managed by the hosting infrastructure.
+- **Storage Persistence:** In the default container configuration, receipt attachments are stored locally on the filesystem in `storage/receipts/`. Production persistence across ephemeral container restarts requires a mounted persistent volume. Cloud object storage is architected as an interface via [`ReceiptStorageInterface`](src/Services/Storage/ReceiptStorageInterface.php) for future implementation.
 - **Real-Time Updates:** Real-time updates utilize Server-Sent Events (SSE) and HTTP polling rather than bidirectional WebSockets.
-- **Single-Node Storage:** Receipt attachments are managed on local private storage (`storage/receipts/`). S3-compatible cloud object storage integration is an architectural interface supported by [`ReceiptStorageInterface`](src/Services/Storage/ReceiptStorageInterface.php), not an active default driver.
-- **Rollback Strategy:** Production rollback requires an immutable deployment package and verified database backup strategy to be established during the infrastructure deployment phase.
+- **PWA Update Timing:** Automatic updates prioritize safety over immediate reload. The update coordinator defers applying a new service worker while a user has an active modal open, unsubmitted text in a form, or an in-flight mutation.
 
 ---
 
