@@ -114,15 +114,72 @@ class ApiClient {
 
         try {
             const response = await fetch(url, config);
-            const data = await response.json();
 
-            if (!response.ok || data.success === false) {
-                const errorMessage = data?.error?.message || `HTTP ${response.status}: Request failed`;
+            // Safely inspect Content-Type header if available
+            const rawContentType = (response.headers && typeof response.headers.get === 'function')
+                ? (response.headers.get('content-type') || '')
+                : '';
+            const contentType = rawContentType.toLowerCase();
+            const isExplicitHtml = contentType.includes('text/html');
+
+            let data = null;
+
+            // Attempt JSON parsing only when response is not explicitly HTML
+            if (!isExplicitHtml && typeof response.json === 'function') {
+                try {
+                    data = await response.json();
+                } catch (_) {
+                    data = null;
+                }
+            }
+
+            // Handle HTTP errors or structured failure envelopes
+            if (!response.ok || (data && data.success === false)) {
+                let errorMessage = data?.error?.message;
+                let errorCode = data?.error?.code;
+
+                if (!errorMessage || typeof errorMessage !== 'string' || errorMessage.trim() === '') {
+                    if (response.status === 502) {
+                        errorMessage = isMutation
+                            ? 'The server or gateway is temporarily unavailable (HTTP 502). Please check settlement history before retrying.'
+                            : 'The server or gateway is temporarily unavailable (HTTP 502). Please try again in a few moments.';
+                        errorCode = errorCode || 'BAD_GATEWAY';
+                    } else if (response.status === 503) {
+                        errorMessage = 'The server is temporarily unavailable (HTTP 503). Please retry in a few moments.';
+                        errorCode = errorCode || 'SERVICE_UNAVAILABLE';
+                    } else if (response.status === 504) {
+                        errorMessage = 'Gateway timed out (HTTP 504). Please check your connection and retry.';
+                        errorCode = errorCode || 'GATEWAY_TIMEOUT';
+                    } else if (response.status === 404) {
+                        errorMessage = 'The requested resource was not found (HTTP 404).';
+                        errorCode = errorCode || 'NOT_FOUND';
+                    } else if (response.status >= 500) {
+                        errorMessage = `Server error (HTTP ${response.status}). Please try again later.`;
+                        errorCode = errorCode || `SERVER_ERROR_${response.status}`;
+                    } else {
+                        errorMessage = `HTTP ${response.status}: Request failed`;
+                        errorCode = errorCode || `HTTP_${response.status}`;
+                    }
+                }
+
                 const error = new Error(errorMessage);
-                error.code = data?.error?.code || 'REQUEST_FAILED';
+                error.code = errorCode || 'REQUEST_FAILED';
                 error.details = data?.error?.details || null;
                 error.status = response.status;
                 throw error;
+            }
+
+            // If HTTP status is 204 No Content or 205 Reset Content, return success envelope
+            if (response.status === 204 || response.status === 205) {
+                return { success: true, data: null };
+            }
+
+            // If HTTP status is 2xx, but could not be parsed as valid JSON
+            if (data === null) {
+                const parseError = new Error('Invalid or corrupted JSON response received from server.');
+                parseError.code = 'INVALID_JSON_RESPONSE';
+                parseError.status = response.status;
+                throw parseError;
             }
 
             return data;

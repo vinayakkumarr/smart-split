@@ -90,6 +90,7 @@ const testSuites = [
     { file: 'test_p3_features.mjs', desc: 'P3 Offline Outbox Sync, PDF Reports & Spending Budget' },
     { file: 'test_settings_view.mjs', desc: 'Dedicated Settings View & Preferences Engine' },
     { file: 'test_frontend_idempotency.mjs', desc: 'Frontend Idempotency & Cryptographic Keys Engine' },
+    { file: 'test_api_client_error_resilience.mjs', desc: 'API Client Gateway 502/503/504 & Non-JSON Error Resilience' },
 ];
 
 let passed = 0;
