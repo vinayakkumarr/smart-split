@@ -62,7 +62,10 @@ function simulateExceptionHandler(
         }
     }
 
-    $statusCode = ($exception->getCode() >= 400 && $exception->getCode() < 600) ? (int) $exception->getCode() : 500;
+    $rawCode = $exception->getCode();
+    $statusCode = (is_int($rawCode) && $rawCode >= 400 && $rawCode <= 599)
+        ? $rawCode
+        : ((is_string($rawCode) && preg_match('/^[45][0-9]{2}$/', trim($rawCode))) ? (int) $rawCode : 500);
     $errorCode = match ($statusCode) {
         400 => 'BAD_REQUEST',
         401 => 'UNAUTHORIZED',
@@ -299,6 +302,151 @@ assertSec06(
     str_contains($logBuffer, 'RuntimeException') && str_contains($logBuffer, 'SQLSTATE'),
     'SEC06-T08',
     'Server-side diagnostic log string preserves full exception context for administrator logs',
+    $passed,
+    $total
+);
+
+// -----------------------------------------------------------------------------
+// SEC06-T09: SQLSTATE 42S02 Table-Not-Found Regression Test (Never status 42)
+// -----------------------------------------------------------------------------
+$pdoEx42S02 = new PDOException("SQLSTATE[42S02]: Base table or view not found: 1146 Table 'smartsplit.workspace_events' doesn't exist", 0);
+$refCode = new ReflectionProperty(Exception::class, 'code');
+$refCode->setAccessible(true);
+$refCode->setValue($pdoEx42S02, '42S02');
+
+$pdo42S02Response = simulateExceptionHandler(
+    $pdoEx42S02,
+    isProduction: true,
+    rawDebug: false,
+    requestUri: '/api/groups/tok_test/settlements',
+    acceptHeader: 'application/json'
+);
+
+assertSec06(
+    $pdo42S02Response['status'] === 500
+    && $pdo42S02Response['json']['success'] === false
+    && $pdo42S02Response['json']['error']['code'] === 'INTERNAL_SERVER_ERROR'
+    && $pdo42S02Response['json']['error']['message'] === 'An unexpected error occurred. Please try again later.'
+    && !isset($pdo42S02Response['json']['error']['details'])
+    && !str_contains($pdo42S02Response['raw'], '42S02')
+    && !str_contains($pdo42S02Response['raw'], 'workspace_events')
+    && Response::getLastStatusCode() === 500,
+    'SEC06-T09',
+    'PDOException with SQLSTATE 42S02 maps to HTTP 500 (never status 42) with zero schema disclosure',
+    $passed,
+    $total
+);
+
+// -----------------------------------------------------------------------------
+// SEC06-T10: Additional SQLSTATE Class 42 Codes (42S22 Column Not Found, 42000 Syntax Error)
+// -----------------------------------------------------------------------------
+$pdoEx42S22 = new PDOException("Unknown column 'confirmed_by' in 'field list'", 0);
+$refCode->setValue($pdoEx42S22, '42S22');
+$pdo42S22Response = simulateExceptionHandler($pdoEx42S22, true, false, '/api/groups', 'application/json');
+
+$pdoEx42000 = new PDOException("Syntax error or access rule violation", 0);
+$refCode->setValue($pdoEx42000, '42000');
+$pdo42000Response = simulateExceptionHandler($pdoEx42000, true, false, '/api/groups', 'application/json');
+
+assertSec06(
+    $pdo42S22Response['status'] === 500
+    && $pdo42S22Response['json']['error']['code'] === 'INTERNAL_SERVER_ERROR'
+    && $pdo42000Response['status'] === 500
+    && $pdo42000Response['json']['error']['code'] === 'INTERNAL_SERVER_ERROR',
+    'SEC06-T10',
+    'SQLSTATE 42S22 and 42000 exceptions safely map to HTTP 500 (never status 42 or 420)',
+    $passed,
+    $total
+);
+
+// -----------------------------------------------------------------------------
+// SEC06-T11: Non-HTTP Integer Exception Code 42 (Safely falls back to 500)
+// -----------------------------------------------------------------------------
+$int42Exception = new Exception('Arbitrary application failure', 42);
+$int42Response = simulateExceptionHandler($int42Exception, true, false, '/api/groups', 'application/json');
+
+assertSec06(
+    $int42Response['status'] === 500
+    && $int42Response['json']['error']['code'] === 'INTERNAL_SERVER_ERROR'
+    && Response::getLastStatusCode() === 500,
+    'SEC06-T11',
+    'Exception with non-HTTP integer code 42 falls back to HTTP 500',
+    $passed,
+    $total
+);
+
+// -----------------------------------------------------------------------------
+// SEC06-T12: Valid Numeric-String Codes (Strict 3-digit HTTP range preserved)
+// -----------------------------------------------------------------------------
+$str404Exception = new Exception('Entity not found', 0);
+$refCode->setValue($str404Exception, '404');
+$str404Response = simulateExceptionHandler($str404Exception, true, false, '/api/groups', 'application/json');
+
+$str422Exception = new Exception('Validation error', 0);
+$refCode->setValue($str422Exception, '422');
+$str422Response = simulateExceptionHandler($str422Exception, true, false, '/api/groups', 'application/json');
+
+assertSec06(
+    $str404Response['status'] === 404
+    && $str404Response['json']['error']['code'] === 'NOT_FOUND'
+    && $str422Response['status'] === 422
+    && $str422Response['json']['error']['code'] === 'UNPROCESSABLE_ENTITY',
+    'SEC06-T12',
+    'Valid numeric-string HTTP codes ("404", "422") preserve their intended 4xx status',
+    $passed,
+    $total
+);
+
+// -----------------------------------------------------------------------------
+// SEC06-T13: Out-of-Range, Partially Numeric and Malformed Codes
+// -----------------------------------------------------------------------------
+$malformedCodes = ['422abc', '0', '-1', '600', '999', '', '   '];
+$allMalformedSafe = true;
+foreach ($malformedCodes as $badCode) {
+    $badEx = new Exception('Malformed code test', 0);
+    $refCode->setValue($badEx, $badCode);
+    $badRes = simulateExceptionHandler($badEx, true, false, '/api/groups', 'application/json');
+    if ($badRes['status'] !== 500 || $badRes['json']['error']['code'] !== 'INTERNAL_SERVER_ERROR') {
+        $allMalformedSafe = false;
+        break;
+    }
+}
+
+assertSec06(
+    $allMalformedSafe,
+    'SEC06-T13',
+    'Partially numeric ("422abc"), negative, zero, and out-of-range string codes safely fall back to HTTP 500',
+    $passed,
+    $total
+);
+
+// -----------------------------------------------------------------------------
+// SEC06-T14: Response Layer Defensive Guard Integrity
+// -----------------------------------------------------------------------------
+ob_start();
+Response::error('Defensive error test', 'ERR_TEST', null, 42, false);
+$rawError42 = ob_get_clean();
+$lastStatusError42 = Response::getLastStatusCode();
+
+ob_start();
+Response::json(['data' => 'test'], 42, [], false);
+$rawJson42 = ob_get_clean();
+$lastStatusJson42 = Response::getLastStatusCode();
+
+ob_start();
+Response::json(['data' => 'valid'], 201, [], false);
+$rawJson201 = ob_get_clean();
+$lastStatusJson201 = Response::getLastStatusCode();
+
+assertSec06(
+    $lastStatusError42 === 500
+    && $lastStatusJson42 === 500
+    && $lastStatusJson201 === 201
+    && json_decode($rawError42, true)['success'] === false
+    && json_decode($rawJson42, true)['success'] === true
+    && json_decode($rawJson201, true)['success'] === true,
+    'SEC06-T14',
+    'Response::error and Response::json defensively guard against invalid status 42 (failing closed to 500)',
     $passed,
     $total
 );

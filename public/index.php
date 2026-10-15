@@ -83,7 +83,10 @@ set_error_handler(function (int $errno, string $errstr, string $errfile, int $er
 });
 
 set_exception_handler(function (Throwable $e) use ($isDebug): void {
-    $statusCode = ($e->getCode() >= 400 && $e->getCode() < 600) ? (int) $e->getCode() : 500;
+    $rawCode = $e->getCode();
+    $statusCode = (is_int($rawCode) && $rawCode >= 400 && $rawCode <= 599)
+        ? $rawCode
+        : ((is_string($rawCode) && preg_match('/^[45][0-9]{2}$/', trim($rawCode))) ? (int) $rawCode : 500);
     $errorCode = match ($statusCode) {
         400 => 'BAD_REQUEST',
         401 => 'UNAUTHORIZED',

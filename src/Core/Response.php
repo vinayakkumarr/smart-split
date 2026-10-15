@@ -27,6 +27,10 @@ class Response
      */
     public static function json(mixed $data, int $statusCode = 200, array $meta = [], bool $exit = true): void
     {
+        // Defensive status guard: clamp out-of-range status codes to 500 (fail-closed; never mask failures as 200)
+        if ($statusCode < 100 || $statusCode > 599) {
+            $statusCode = 500;
+        }
         self::$lastStatusCode = $statusCode;
         if (!headers_sent()) {
             http_response_code($statusCode);
@@ -66,6 +70,10 @@ class Response
         int $statusCode = 400,
         bool $exit = true
     ): void {
+        // Defensive status guard: clamp out-of-range or non-error status codes to 500 (fail-closed)
+        if ($statusCode < 400 || $statusCode > 599) {
+            $statusCode = 500;
+        }
         self::$lastStatusCode = $statusCode;
         if (!headers_sent()) {
             http_response_code($statusCode);
