@@ -14,6 +14,10 @@ envsubst '${PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
 chown -R www-data:www-data /var/www/html/storage
 chmod -R 775 /var/www/html/storage
 
+# Run database schema migrations automatically on startup
+echo "[SmartSplit] Running database migrations..."
+php /var/www/html/bin/migrate.php || echo "[SmartSplit WARNING] Migration runner encountered an error on startup."
+
 # Start PHP-FPM in background daemon mode
 php-fpm -D
 
